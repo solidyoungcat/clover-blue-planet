@@ -1,15 +1,97 @@
-import { createServer } from "http";
+import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import { Server } from "socket.io";
 import { setupSocket } from "./socket";
+import { roomExists, hasPassword, getUserCount, getRoomCount, getTotalUsers } from "./rooms";
+import { getStats } from "./db";
 
-const httpServer = createServer();
+const PORT = process.env.PORT || 3001;
+const API_VERSION = "1";
+
+// ========== REST API 路由 ==========
+
+function sendJSON(res: ServerResponse, status: number, data: unknown) {
+  res.writeHead(status, {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+  });
+  res.end(JSON.stringify(data));
+}
+
+function handleAPI(req: IncomingMessage, res: ServerResponse): boolean {
+  // CORS preflight
+  if (req.method === "OPTIONS") {
+    sendJSON(res, 204, {});
+    return true;
+  }
+
+  const url = new URL(req.url || "/", `http://localhost:${PORT}`);
+
+  // GET /api/v1/health
+  if (req.method === "GET" && url.pathname === `/api/v${API_VERSION}/health`) {
+    sendJSON(res, 200, {
+      status: "ok",
+      version: API_VERSION,
+      uptime: Math.floor(process.uptime()),
+      rooms: getRoomCount(),
+      users: getTotalUsers(),
+      ...getStats(),
+    });
+    return true;
+  }
+
+  // GET /api/v1/rooms/:code
+  const roomMatch = url.pathname.match(new RegExp(`^/api/v${API_VERSION}/rooms/([A-Z0-9]{6})$`));
+  if (req.method === "GET" && roomMatch) {
+    const code = roomMatch[1];
+    sendJSON(res, 200, {
+      code,
+      exists: roomExists(code),
+      hasPassword: hasPassword(code),
+      userCount: getUserCount(code),
+    });
+    return true;
+  }
+
+  // POST /api/v1/rooms/validate
+  if (req.method === "POST" && url.pathname === `/api/v${API_VERSION}/rooms/validate`) {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      try {
+        const { code } = JSON.parse(body);
+        sendJSON(res, 200, {
+          valid: /^[A-Z0-9]{6}$/.test(code || ""),
+          exists: roomExists(code),
+        });
+      } catch {
+        sendJSON(res, 400, { error: "invalid JSON" });
+      }
+    });
+    return true;
+  }
+
+  return false;
+}
+
+// ========== 启动 ==========
+
+const httpServer = createServer((req, res) => {
+  if (!handleAPI(req, res)) {
+    // Not an API route — let Socket.IO handle it
+    res.writeHead(200);
+    res.end("🍀 四叶草蓝星球 信令服务器");
+  }
+});
+
 const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] },
 });
 
 setupSocket(io);
 
-const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
-  console.log(`🍀 四叶草蓝星球 信令服务器运行在 :${PORT}`);
+  console.log(`🍀 四叶草蓝星球 信令服务器 v${API_VERSION} 运行在 :${PORT}`);
+  console.log(`   REST API: http://localhost:${PORT}/api/v${API_VERSION}/health`);
 });

@@ -60,8 +60,10 @@ export interface PetUpdatePayload {
 // ========== 客户端→服务端 事件名 ==========
 
 export const ClientEvents = {
+  ROOM_CREATE: "room:create",
   ROOM_JOIN: "room:join",
   ROOM_LEAVE: "room:leave",
+  ROOM_CHECK: "room:check",
   CHAT_MESSAGE: "chat:message",
   SYNC_STATE: "sync:state",
   PET_UPDATE: "pet:update",
@@ -70,12 +72,19 @@ export const ClientEvents = {
 // ========== 服务端→客户端 事件名 ==========
 
 export const ServerEvents = {
+  ROOM_CREATED: "room:created",
+  ROOM_CHECK_RESULT: "room:check-result",
+  ROOM_NEED_PASSWORD: "room:need-password",
+  ROOM_LEFT: "room:left",
   PARTNER_JOINED: "room:partner-joined",
   PARTNER_LEFT: "room:partner-left",
+  ERROR: "error",
   CHAT_MESSAGE: "chat:message",
   SYNC_STATE: "sync:state",
   PET_UPDATE: "pet:update",
 } as const;
+
+export const API_VERSION = 1;
 
 // ========== 校验函数 ==========
 

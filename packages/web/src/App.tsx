@@ -6,7 +6,10 @@ import {
 
 export function App() {
   const { roomCode, partnerOnline } = useRoomStore();
-  const { connectionStatus, errorMessage, sendChatMessage } = useSocket(roomCode);
+  const {
+    connectionStatus, errorMessage, sendChatMessage,
+    createRoom, joinRoom, checkRoom,
+  } = useSocket(roomCode);
   const [cinemaMode, setCinemaMode] = useState(false);
 
   if (cinemaMode) {
@@ -20,7 +23,7 @@ export function App() {
       playerArea={
         <div className="flex flex-col flex-1 min-h-0">
           <ConnectionBanner status={connectionStatus} message={errorMessage} />
-          <RoomConnector />
+          <RoomConnector createRoom={createRoom} joinRoom={joinRoom} checkRoom={checkRoom} />
           <VideoPlayer roomCode={roomCode} onFullscreen={() => setCinemaMode(true)} />
           <PlayerToolbar />
         </div>
