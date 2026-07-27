@@ -1,12 +1,12 @@
 import React, { useState } from "react";
 import {
   AppLayout, useRoomStore, RoomConnector, useSocket,
-  ChatPanel, VideoPlayer, PlayerToolbar, CinemaMode,
+  ChatPanel, VideoPlayer, PlayerToolbar, CinemaMode, ConnectionBanner,
 } from "@clover/shared";
 
 export function App() {
   const { roomCode, partnerOnline } = useRoomStore();
-  const { isConnected, sendChatMessage } = useSocket(roomCode);
+  const { connectionStatus, errorMessage, sendChatMessage } = useSocket(roomCode);
   const [cinemaMode, setCinemaMode] = useState(false);
 
   if (cinemaMode) {
@@ -19,6 +19,7 @@ export function App() {
       partnerOnline={partnerOnline}
       playerArea={
         <div className="flex flex-col flex-1 min-h-0">
+          <ConnectionBanner status={connectionStatus} message={errorMessage} />
           <RoomConnector />
           <VideoPlayer roomCode={roomCode} onFullscreen={() => setCinemaMode(true)} />
           <PlayerToolbar />
