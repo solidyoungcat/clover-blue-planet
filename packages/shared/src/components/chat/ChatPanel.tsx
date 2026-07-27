@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { useChatStore, type Message } from "../../stores/chatStore";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
+import { PetDisplay } from "../pet/PetDisplay";
 
 interface ChatPanelProps {
   sendChatMessage: (msg: Message) => void;
@@ -44,6 +45,7 @@ export function ChatPanel({ sendChatMessage }: ChatPanelProps) {
         ))}
         <div ref={bottomRef} />
       </div>
+      <PetDisplay />
       <MessageInput onSend={handleSend} />
     </div>
   );

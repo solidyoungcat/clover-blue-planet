@@ -14,6 +14,8 @@ export { ChatPanel } from "./components/chat/ChatPanel";
 export { MessageBubble } from "./components/chat/MessageBubble";
 export { MessageInput } from "./components/chat/MessageInput";
 export { VoiceRecorder } from "./components/chat/VoiceRecorder";
+export { PetDisplay } from "./components/pet/PetDisplay";
+export { PetSettings } from "./components/pet/PetSettings";
 export { VideoPlayer } from "./components/player/VideoPlayer";
 export { SourceSelector } from "./components/player/SourceSelector";
 export { PlaybackControls } from "./components/player/PlaybackControls";
