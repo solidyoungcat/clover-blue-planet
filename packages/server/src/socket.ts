@@ -16,6 +16,7 @@ const RATE_LIMITS = {
 };
 
 const rateLimitMap = new Map<string, Map<string, number[]>>();
+const socketRoomMap = new Map<string, string>(); // socketId → roomCode
 
 function checkRateLimit(socketId: string, event: keyof typeof RATE_LIMITS): boolean {
   const limit = RATE_LIMITS[event];
@@ -30,6 +31,11 @@ function checkRateLimit(socketId: string, event: keyof typeof RATE_LIMITS): bool
   valid.push(now);
   socketLimits.set(event, valid);
   return true;
+}
+
+function cleanupClient(socketId: string, code?: string) {
+  rateLimitMap.delete(socketId);
+  if (code) socketRoomMap.delete(socketId);
 }
 
 // ========== 字段校验 ==========
@@ -167,6 +173,7 @@ export function setupSocket(io: Server) {
       }
 
       socket.join(code);
+      socketRoomMap.set(socket.id, code);
       if (result.partnerId) {
         io.to(result.partnerId).emit("room:partner-joined");
         socket.emit("room:partner-joined");
@@ -231,7 +238,17 @@ export function setupSocket(io: Server) {
     });
 
     socket.on("disconnect", (reason) => {
-      console.log(`[disconnect] ${socket.id} (${reason})`);
+      const roomCode = socketRoomMap.get(socket.id);
+      if (roomCode) {
+        const remaining = leaveRoom(roomCode, socket.id);
+        socket.leave(roomCode);
+        // Notify partner
+        if (remaining) {
+          io.to(remaining).emit("room:partner-left");
+        }
+      }
+      cleanupClient(socket.id, roomCode);
+      console.log(`[disconnect] ${socket.id} (${reason})${roomCode ? ` ← ${roomCode}` : ""}`);
     });
   });
 }

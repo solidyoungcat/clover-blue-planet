@@ -57,8 +57,17 @@ function handleAPI(req: IncomingMessage, res: ServerResponse): boolean {
   // POST /api/v1/rooms/validate
   if (req.method === "POST" && url.pathname === `/api/v${API_VERSION}/rooms/validate`) {
     let body = "";
-    req.on("data", (chunk) => (body += chunk));
+    let bodySize = 0;
+    const MAX_BODY = 1024;
+    req.on("data", (chunk) => {
+      bodySize += chunk.length;
+      if (bodySize <= MAX_BODY) body += chunk;
+    });
     req.on("end", () => {
+      if (bodySize > MAX_BODY) {
+        sendJSON(res, 413, { error: "请求体过大" });
+        return;
+      }
       try {
         const { code } = JSON.parse(body);
         sendJSON(res, 200, {
@@ -66,7 +75,7 @@ function handleAPI(req: IncomingMessage, res: ServerResponse): boolean {
           exists: roomExists(code),
         });
       } catch {
-        sendJSON(res, 400, { error: "invalid JSON" });
+        sendJSON(res, 400, { error: "无效的 JSON" });
       }
     });
     return true;

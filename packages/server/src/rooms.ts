@@ -1,23 +1,28 @@
-import { createHash } from "crypto";
+import { createHash, randomBytes } from "crypto";
 
 interface Room {
   code: string;
   users: Set<string>;
-  passwordHash: string | null;  // null = no password
+  passwordHash: string | null;
+  passwordSalt: string | null;
   createdAt: number;
 }
 
 const roomMap = new Map<string, Room>();
 
-function hashPassword(password: string): string {
-  return createHash("sha256").update(password).digest("hex");
+function hashPassword(password: string, salt?: string): { hash: string; salt: string } {
+  const s = salt || randomBytes(16).toString("hex");
+  const hash = createHash("sha256").update(s + password).digest("hex");
+  return { hash, salt: s };
 }
 
 export function createRoom(code: string, password?: string): Room {
+  const { hash, salt } = password ? hashPassword(password) : { hash: null, salt: null };
   const room: Room = {
     code,
     users: new Set(),
-    passwordHash: password ? hashPassword(password) : null,
+    passwordHash: hash,
+    passwordSalt: salt,
     createdAt: Date.now(),
   };
   roomMap.set(code, room);
@@ -38,7 +43,7 @@ export function joinRoom(
   if (room.passwordHash && !password) {
     return { error: "NEED_PASSWORD" };
   }
-  if (room.passwordHash && password && hashPassword(password) !== room.passwordHash) {
+  if (room.passwordHash && password && hashPassword(password, room.passwordSalt!).hash !== room.passwordHash) {
     return { error: "密码错误" };
   }
 

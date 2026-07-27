@@ -94,10 +94,17 @@ export function cleanOldMessages(roomCode: string): void {
 export function getStats(): { totalMessages: number; dbSize: string } {
   const count = (db.prepare("SELECT COUNT(*) as c FROM messages").get() as { c: number }).c;
   const size = fs.statSync(DB_PATH).size;
-  return {
-    totalMessages: count,
-    dbSize: `${(size / 1024).toFixed(1)} KB`,
-  };
+  return { totalMessages: count, dbSize: `${(size / 1024).toFixed(1)} KB` };
 }
+
+// Auto-clean every hour: keep 1000 messages per room
+setInterval(() => {
+  const rooms = db.prepare("SELECT DISTINCT room_code FROM messages").all() as { room_code: string }[];
+  for (const { room_code } of rooms) {
+    cleanOldMessages(room_code);
+  }
+  // Vacuum to reclaim disk space
+  db.pragma("incremental_vacuum");
+}, 3600_000);
 
 export default db;
