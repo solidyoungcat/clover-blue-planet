@@ -1,9 +1,12 @@
 import React from "react";
-import { AppLayout, useRoomStore, RoomConnector, useSocket, ChatPanel, VideoPlayer } from "@clover/shared";
+import {
+  AppLayout, useRoomStore, RoomConnector, useSocket,
+  ChatPanel, VideoPlayer,
+} from "@clover/shared";
 
 export function App() {
   const { roomCode, partnerOnline } = useRoomStore();
-  const { isConnected, sendChatMessage, sendSyncState } = useSocket(roomCode);
+  const { isConnected, sendChatMessage } = useSocket(roomCode);
 
   return (
     <AppLayout
@@ -12,7 +15,7 @@ export function App() {
       playerArea={
         <div className="flex flex-col flex-1 min-h-0">
           <RoomConnector />
-          <VideoPlayer />
+          <VideoPlayer roomCode={roomCode} />
         </div>
       }
       chatArea={

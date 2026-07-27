@@ -1,16 +1,20 @@
 import React, { useRef, useEffect } from "react";
 import { usePlayerStore } from "../../stores/playerStore";
+import { useVideoSync } from "../../hooks/useVideoSync";
 import { SourceSelector } from "./SourceSelector";
 import { PlaybackControls } from "./PlaybackControls";
 
 interface VideoPlayerProps {
   onFullscreen?: () => void;
+  roomCode: string;
 }
 
-export function VideoPlayer({ onFullscreen }: VideoPlayerProps) {
+export function VideoPlayer({ onFullscreen, roomCode }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const { isPlaying, currentTime, playbackRate, volume, source, syncStatus,
     setCurrentTime, setDuration, play, pause } = usePlayerStore();
+
+  useVideoSync(roomCode);
 
   useEffect(() => {
     const v = videoRef.current; if (!v) return;

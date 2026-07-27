@@ -16,3 +16,6 @@ export { MessageInput } from "./components/chat/MessageInput";
 export { VideoPlayer } from "./components/player/VideoPlayer";
 export { SourceSelector } from "./components/player/SourceSelector";
 export { PlaybackControls } from "./components/player/PlaybackControls";
+export { useVideoSync } from "./hooks/useVideoSync";
+export { createSyncPayload, shouldApplyRemoteState } from "./lib/sync";
+export type { SyncState } from "./lib/sync";
