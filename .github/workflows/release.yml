@@ -1,0 +1,129 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:      # 允许手动触发
+
+jobs:
+  # ========== Web 前端 ==========
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - run: pnpm install
+      - run: pnpm build:web
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: packages/web/dist/
+
+  # ========== Windows 桌面端 ==========
+  build-desktop-win:
+    runs-on: windows-latest
+    needs: build-web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - run: pnpm install
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: packages/web/dist/
+
+      - run: pnpm --filter desktop build:ts
+      - run: pnpm --filter desktop exec electron-builder --win --publish=never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-win
+          path: packages/desktop/release/*.exe
+
+  # ========== macOS 桌面端 ==========
+  build-desktop-mac:
+    runs-on: macos-latest
+    needs: build-web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - run: pnpm install
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: packages/web/dist/
+
+      - run: pnpm --filter desktop build:ts
+      - run: pnpm --filter desktop exec electron-builder --mac --publish=never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-mac
+          path: packages/desktop/release/*.dmg
+
+  # ========== 发布 Release ==========
+  release:
+    runs-on: ubuntu-latest
+    needs: [build-desktop-win, build-desktop-mac]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: desktop-win
+          path: release/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: desktop-mac
+          path: release/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: "四叶草蓝星球 ${{ github.ref_name }}"
+          body: |
+            ## 🍀 四叶草蓝星球 ${{ github.ref_name }}
+
+            ### 🌐 网页版
+            直接访问：https://app.clover-blue.planet
+
+            ### 🖥 桌面端
+            下载对应平台的安装包使用。
+
+            ### 更新内容
+            - 请在此处填写版本更新说明
+          files: release/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
