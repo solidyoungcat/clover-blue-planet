@@ -64,5 +64,5 @@ $ tsc --noEmit
 git add -A && git commit -m "chore: scaffold monorepo with shared, web, server packages"
 ```
 
-**Commit**: `cddf226` — 27 files changed, 4134 insertions  
+**Commit**: `524cae0` — 27 files changed, 4134 insertions  
 提交包含 16 个源文件 + pnpm-lock.yaml + 任务简报文件。
