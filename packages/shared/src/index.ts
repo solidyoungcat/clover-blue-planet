@@ -19,6 +19,8 @@ export { PetSettings } from "./components/pet/PetSettings";
 export { VideoPlayer } from "./components/player/VideoPlayer";
 export { SourceSelector } from "./components/player/SourceSelector";
 export { PlaybackControls } from "./components/player/PlaybackControls";
+export { PlayerToolbar } from "./components/player/PlayerToolbar";
+export { CinemaMode } from "./components/layout/CinemaMode";
 export { useVideoSync } from "./hooks/useVideoSync";
 export { createSyncPayload, shouldApplyRemoteState } from "./lib/sync";
 export type { SyncState } from "./lib/sync";
