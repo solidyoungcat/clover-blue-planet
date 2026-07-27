@@ -8,3 +8,5 @@ export { usePlayerStore } from "./stores/playerStore";
 export { usePetStore } from "./stores/petStore";
 export { useThemeStore } from "./stores/themeStore";
 export type { Message } from "./stores/chatStore";
+export { useSocket } from "./hooks/useSocket";
+export { RoomConnector } from "./components/room/RoomConnector";
