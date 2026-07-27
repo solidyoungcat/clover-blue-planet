@@ -1,11 +1,35 @@
 {
   "name": "desktop",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "main": "dist/main/index.js",
   "scripts": {
     "dev": "concurrently \"pnpm --filter web dev\" \"wait-on http://localhost:3000 && electron .\"",
-    "build": "pnpm --filter web build && electron-builder"
+    "build:ts": "tsc",
+    "build": "pnpm build:ts && pnpm --filter web build && electron-builder --win --mac"
+  },
+  "build": {
+    "appId": "com.clover.blueplanet",
+    "productName": "四叶草蓝星球",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "../web/dist/**/*"
+    ],
+    "win": {
+      "target": ["nsis"],
+      "icon": null
+    },
+    "mac": {
+      "target": ["dmg"],
+      "icon": null
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "dependencies": {
     "@clover/shared": "workspace:*"
