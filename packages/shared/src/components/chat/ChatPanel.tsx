@@ -16,7 +16,7 @@ export function ChatPanel({ sendChatMessage }: ChatPanelProps) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSend = (text: string, type: "text" | "emoji") => {
+  const handleSend = (text: string, type: "text" | "emoji" | "voice") => {
     const msg: Message = {
       id: String(Date.now()),
       sender: "me",

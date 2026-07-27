@@ -1,9 +1,10 @@
 import React, { useState } from "react";
+import { VoiceRecorder } from "./VoiceRecorder";
 
 const QUICK_EMOJIS = ["😊", "😂", "😍", "🥰", "❤️", "🎬", "🍿", "💕", "😭", "🤣", "🔥", "✨"];
 
 interface MessageInputProps {
-  onSend: (text: string, type: "text" | "emoji") => void;
+  onSend: (text: string, type: "text" | "emoji" | "voice") => void;
 }
 
 export function MessageInput({ onSend }: MessageInputProps) {
@@ -50,6 +51,12 @@ export function MessageInput({ onSend }: MessageInputProps) {
         >
           😊
         </button>
+        <VoiceRecorder
+          onRecorded={(blob) => {
+            const url = URL.createObjectURL(blob);
+            onSend("[语音消息]", "voice");
+          }}
+        />
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
