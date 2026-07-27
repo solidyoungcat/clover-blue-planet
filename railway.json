@@ -1,0 +1,11 @@
+{
+  "build": {
+    "builder": "nixpacks",
+    "buildCommand": "cd packages/server && pnpm install && pnpm build"
+  },
+  "deploy": {
+    "startCommand": "cd packages/server && node dist/index.js",
+    "healthcheckPath": "/",
+    "restartPolicyType": "ON_FAILURE"
+  }
+}
