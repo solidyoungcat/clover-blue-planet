@@ -43,8 +43,10 @@ export function VoiceRecorder({ onRecorded }: VoiceRecorderProps) {
       onMouseDown={startRecording}
       onMouseUp={stopRecording}
       onMouseLeave={() => recording && stopRecording()}
-      className={`text-lg transition-colors ${
-        recording ? "text-red-400 animate-pulse" : "text-ocean-300 hover:text-ocean-100"
+      className={`btn-ocean btn-sm !px-2 transition-all ${
+        recording
+          ? "!border-red-400/50 !text-red-400 !shadow-glow-sm animate-pulse"
+          : ""
       }`}
       title="按住录音"
     >

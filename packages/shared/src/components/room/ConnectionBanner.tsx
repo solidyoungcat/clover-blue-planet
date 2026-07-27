@@ -6,11 +6,11 @@ interface ConnectionBannerProps {
   message: string | null;
 }
 
-const STATUS_CONFIG: Record<ConnectionStatus, { bg: string; text: string; label: string }> = {
-  connected: { bg: "bg-green-900/50", text: "text-green-300", label: "● 已连接" },
-  connecting: { bg: "bg-ocean-800/50", text: "text-ocean-300", label: "◌ 连接中..." },
-  reconnecting: { bg: "bg-amber-900/50", text: "text-amber-300", label: "⟳ 重连中..." },
-  disconnected: { bg: "bg-red-900/50", text: "text-red-300", label: "● 已断开" },
+const STATUS_CONFIG: Record<ConnectionStatus, { bg: string; text: string; border: string; label: string; icon: string }> = {
+  connected:    { bg: "bg-gradient-to-r from-emerald-950/60 to-emerald-900/20", text: "text-emerald-300", border: "border-emerald-500/20", label: "已连接", icon: "●" },
+  connecting:   { bg: "bg-gradient-to-r from-ocean-900/60 to-ocean-800/20", text: "text-ocean-300", border: "border-ocean-500/20", label: "连接中…", icon: "◌" },
+  reconnecting: { bg: "bg-gradient-to-r from-amber-950/60 to-amber-900/20", text: "text-amber-300", border: "border-amber-500/20", label: "重连中…", icon: "⟳" },
+  disconnected: { bg: "bg-gradient-to-r from-red-950/60 to-red-900/20", text: "text-red-300", border: "border-red-500/20", label: "已断开", icon: "✕" },
 };
 
 export function ConnectionBanner({ status, message }: ConnectionBannerProps) {
@@ -19,9 +19,10 @@ export function ConnectionBanner({ status, message }: ConnectionBannerProps) {
   const config = STATUS_CONFIG[status];
 
   return (
-    <div className={`flex items-center gap-2 px-3 py-1 text-xs ${config.bg} ${config.text}`}>
-      <span>{config.label}</span>
-      {message && <span className="text-white/70">— {message}</span>}
+    <div className={`flex items-center gap-2 px-3 py-1.5 text-[11px] tracking-wide border-b ${config.bg} ${config.text} ${config.border} animate-slide-up`}>
+      <span className="text-xs">{config.icon}</span>
+      <span className="font-medium">{config.label}</span>
+      {message && <span className="text-white/50">— {message}</span>}
     </div>
   );
 }

@@ -30,46 +30,53 @@ export function MessageInput({ onSend }: MessageInputProps) {
   };
 
   return (
-    <div className="border-t border-ocean-700/50">
+    <div className="border-t border-ocean-700/20">
+      {/* 表情面板 */}
       {showEmoji && (
-        <div className="flex flex-wrap gap-1 px-3 py-2 bg-ocean-900/80">
+        <div className="flex flex-wrap gap-0.5 px-3 py-2 bg-ocean-900/60 border-b border-ocean-700/20 animate-slide-up">
           {QUICK_EMOJIS.map((e) => (
             <button
               key={e}
               onClick={() => handleEmojiClick(e)}
-              className="text-xl hover:bg-ocean-700 rounded p-1 transition-colors"
+              className="text-lg w-8 h-8 flex items-center justify-center rounded-lg hover:bg-ocean-700/50 hover:shadow-glow-sm transition-all"
             >
               {e}
             </button>
           ))}
         </div>
       )}
-      <div className="flex items-center gap-2 px-3 py-2">
+
+      {/* 输入栏 */}
+      <div className="flex items-center gap-1.5 px-2.5 py-2">
         <button
           onClick={() => setShowEmoji(!showEmoji)}
-          className="text-ocean-300 hover:text-ocean-100 transition-colors text-lg"
+          className={`btn-ocean btn-sm !px-2 ${showEmoji ? "border-ocean-400/50 shadow-glow-sm" : ""}`}
         >
           😊
         </button>
+
         <VoiceRecorder
           onRecorded={(blob) => {
-            const url = URL.createObjectURL(blob);
             onSend("[语音消息]", "voice");
           }}
         />
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="说点什么..."
-          className="flex-1 bg-ocean-800/50 text-ocean-100 placeholder-ocean-500 rounded-full px-4 py-1.5 text-sm outline-none border border-ocean-700/50 focus:border-ocean-400 transition-colors"
-        />
+
+        <div className="flex-1 relative">
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="说点什么..."
+            className="w-full bg-ocean-900/40 text-ocean-100 placeholder-ocean-600 rounded-xl px-4 py-2 text-sm outline-none border border-ocean-700/30 focus:border-ocean-500/50 focus:shadow-glow-sm transition-all"
+          />
+        </div>
+
         <button
           onClick={handleSend}
           disabled={!text.trim()}
-          className="text-ocean-300 hover:text-ocean-100 disabled:text-ocean-700 transition-colors"
+          className="btn-primary btn-sm disabled:opacity-30 disabled:cursor-not-allowed disabled:shadow-none"
         >
-          📎
+          发送
         </button>
       </div>
     </div>

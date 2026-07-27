@@ -40,9 +40,10 @@ export function VideoPlayer({ onFullscreen, roomCode }: VideoPlayerProps) {
             onClick={() => isPlaying ? pause() : play()}
             className="max-w-full max-h-full object-contain" />
         ) : (
-          <div className="text-center text-ocean-500">
-            <div className="text-4xl mb-3">📺</div>
-            <p className="text-sm">选择本地文件或粘贴视频链接开始观影</p>
+          <div className="text-center text-ocean-500 select-none">
+            <div className="text-5xl mb-4 opacity-40">📺</div>
+            <p className="text-sm tracking-wide">选择本地文件或粘贴链接</p>
+            <p className="text-ocean-600 text-xs mt-1">支持 mp4 / mkv / avi / webm</p>
           </div>
         )}
       </div>

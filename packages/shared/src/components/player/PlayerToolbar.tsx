@@ -1,20 +1,26 @@
 import React, { useState } from "react";
 import { SourceSelector } from "./SourceSelector";
 import { PetSettings } from "../pet/PetSettings";
+import { usePetStore } from "../../stores/petStore";
 
 export function PlayerToolbar() {
   const [showPetSettings, setShowPetSettings] = useState(false);
+  const isActive = usePetStore((s) => s.isActive);
 
   return (
     <>
-      <div className="flex items-center gap-2 px-3 py-1.5 bg-ocean-900/60 border-t border-ocean-700/30">
+      <div className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-ocean-950/80 to-ocean-900/40 border-t border-ocean-700/20">
         <SourceSelector />
-        <div className="w-px h-4 bg-ocean-700/50" />
+
+        <div className="flex-1" />
+
+        <div className="w-px h-5 bg-ocean-700/20" />
+
         <button
           onClick={() => setShowPetSettings(true)}
-          className="flex items-center gap-1.5 text-xs text-ocean-300 hover:text-ocean-100 bg-ocean-800/50 hover:bg-ocean-700/50 px-3 py-1.5 rounded-full transition-colors"
+          className={`btn-ocean btn-sm ${isActive ? "border-ocean-400/30" : ""}`}
         >
-          🐱 宠物⚙️
+          🐱 宠物
         </button>
       </div>
       {showPetSettings && <PetSettings onClose={() => setShowPetSettings(false)} />}
