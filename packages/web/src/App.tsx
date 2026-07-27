@@ -1,5 +1,5 @@
 import React from "react";
-import { AppLayout, useRoomStore, RoomConnector, useSocket } from "@clover/shared";
+import { AppLayout, useRoomStore, RoomConnector, useSocket, ChatPanel } from "@clover/shared";
 
 export function App() {
   const { roomCode, partnerOnline } = useRoomStore();
@@ -18,9 +18,7 @@ export function App() {
         </div>
       }
       chatArea={
-        <div className="flex-1 flex items-center justify-center text-ocean-400 text-lg">
-          💬 聊天区域
-        </div>
+        <ChatPanel sendChatMessage={sendChatMessage} />
       }
       onCopyRoomCode={() => navigator.clipboard.writeText(roomCode)}
       onOpenTheme={() => {}}

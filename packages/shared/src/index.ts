@@ -10,3 +10,6 @@ export { useThemeStore } from "./stores/themeStore";
 export type { Message } from "./stores/chatStore";
 export { useSocket } from "./hooks/useSocket";
 export { RoomConnector } from "./components/room/RoomConnector";
+export { ChatPanel } from "./components/chat/ChatPanel";
+export { MessageBubble } from "./components/chat/MessageBubble";
+export { MessageInput } from "./components/chat/MessageInput";
