@@ -90,7 +90,7 @@ const httpServer = createServer((req, res) => {
   if (!handleAPI(req, res)) {
     // Health check
     if (req.url === "/" || req.url === "/health") {
-      sendJSON(req as any, res as any, 200, { status: "ok" });
+      sendJSON(res, 200, { status: "ok" });
       return;
     }
     res.writeHead(200);
