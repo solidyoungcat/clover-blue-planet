@@ -55,11 +55,15 @@ ipcMain.handle("resolve:video", async (_event, url: string) => {
     return { url: `http://localhost:4099/api/v1/video/${videoId}.mp4`, cached: true };
   }
 
-  const commands = [
-    "python3 -m yt_dlp",
-    "python -m yt_dlp",
-    "yt-dlp",
-  ];
+  // 优先使用打包的 yt-dlp.exe，其次用系统 Python
+  const bundledYtdlp = path.join(__dirname, "../../../yt-dlp.exe");
+  const commands = fs.existsSync(bundledYtdlp)
+    ? [`"${bundledYtdlp}"`]
+    : [
+        "python3 -m yt_dlp",
+        "python -m yt_dlp",
+        "yt-dlp",
+      ];
 
   for (const cmd of commands) {
     try {

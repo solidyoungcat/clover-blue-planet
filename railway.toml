@@ -1,8 +1,11 @@
 [build]
 builder = "nixpacks"
-buildCommand = "npm install -g pnpm@8 && pnpm install --filter server && cd packages/server && npx tsc"
+buildCommand = "npm install -g pnpm@8 && pnpm install --filter server && cd packages/server && npx tsc && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux -o yt-dlp && chmod +x yt-dlp"
 
 [deploy]
-startCommand = "node packages/server/dist/index.js"
+startCommand = "cd packages/server && npx tsc && node dist/index.js"
 healthcheckPath = "/health"
 restartPolicyType = "always"
+
+[deploy.env]
+DATA_DIR = "/data"
