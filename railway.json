@@ -1,7 +1,7 @@
 {
   "build": {
     "builder": "nixpacks",
-    "buildCommand": "cd packages/server && pnpm install && pnpm build"
+    "buildCommand": "cd packages/server && npm install && npx tsc"
   },
   "deploy": {
     "startCommand": "cd packages/server && node dist/index.js",
