@@ -4,9 +4,6 @@ import path from "path";
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
 const MESSAGES_FILE = path.join(DATA_DIR, "messages.json");
 
-// Ensure data directory
-fs.mkdirSync(DATA_DIR, { recursive: true });
-
 interface StoredMessage {
   id: number;
   room_code: string;
@@ -20,24 +17,43 @@ interface StoredMessage {
 let messages: StoredMessage[] = [];
 let nextId = 1;
 
-// Load from disk
-try {
-  if (fs.existsSync(MESSAGES_FILE)) {
-    const data = JSON.parse(fs.readFileSync(MESSAGES_FILE, "utf-8"));
-    messages = data.messages || [];
-    nextId = data.nextId || 1;
+// ========== 初始化（异步） ==========
+
+export const dbReady: Promise<void> = (async () => {
+  try {
+    await fs.promises.mkdir(DATA_DIR, { recursive: true });
+    if (fs.existsSync(MESSAGES_FILE)) {
+      const raw = await fs.promises.readFile(MESSAGES_FILE, "utf-8");
+      const data = JSON.parse(raw);
+      messages = data.messages || [];
+      nextId = data.nextId || 1;
+    }
+  } catch (e) {
+    console.error("[db] Failed to load messages, starting fresh:", (e as Error).message);
   }
-} catch {
-  // Start fresh
+})();
+
+// ========== 防抖写盘 ==========
+
+let saveTimer: NodeJS.Timeout | null = null;
+
+function scheduleSave() {
+  if (saveTimer) return; // 已有定时器，等待触发
+  saveTimer = setTimeout(async () => {
+    saveTimer = null;
+    try {
+      await fs.promises.writeFile(
+        MESSAGES_FILE,
+        JSON.stringify({ messages, nextId }),
+        "utf-8",
+      );
+    } catch (e) {
+      console.error("[db] Failed to save messages:", (e as Error).message);
+    }
+  }, 500); // 500ms 防抖窗口
 }
 
-function saveToDisk() {
-  try {
-    fs.writeFileSync(MESSAGES_FILE, JSON.stringify({ messages, nextId }), "utf-8");
-  } catch (e) {
-    console.error("[db] Failed to save messages:", e);
-  }
-}
+// ========== 公开 API（接口不变） ==========
 
 export function saveMessage(msg: {
   roomCode: string;
@@ -58,9 +74,11 @@ export function saveMessage(msg: {
   };
   messages.push(stored);
 
-  // Keep last 1000 per room
-  cleanOldMessages(msg.roomCode);
-  saveToDisk();
+  // 保持每房间最多 1000 条
+  trimRoomMessages(msg.roomCode);
+
+  // 异步防抖写盘（不阻塞事件循环）
+  scheduleSave();
 }
 
 export function getRecentMessages(roomCode: string, limit = 100): StoredMessage[] {
@@ -71,21 +89,33 @@ export function getRecentMessages(roomCode: string, limit = 100): StoredMessage[
     .reverse();
 }
 
-function cleanOldMessages(roomCode: string): void {
-  const roomMessages = messages.filter((m) => m.room_code === roomCode);
-  if (roomMessages.length > 1000) {
-    const toKeep = roomMessages
-      .sort((a, b) => b.timestamp - a.timestamp)
-      .slice(0, 1000)
-      .map((m) => m.id);
-    messages = messages.filter(
-      (m) => m.room_code !== roomCode || toKeep.includes(m.id)
-    );
-  }
-}
-
 export function getStats(): { totalMessages: number } {
   return { totalMessages: messages.length };
 }
 
-export { messages as _messages };
+// ========== 内部辅助 ==========
+
+function trimRoomMessages(roomCode: string): void {
+  const roomMsgs = messages.filter((m) => m.room_code === roomCode);
+  if (roomMsgs.length > 1000) {
+    const toKeep = new Set(
+      roomMsgs
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, 1000)
+        .map((m) => m.id),
+    );
+    messages = messages.filter(
+      (m) => m.room_code !== roomCode || toKeep.has(m.id),
+    );
+  }
+}
+
+// 紧急退出时同步刷盘（供 process.on('exit') 调用）
+export function flushSync(): void {
+  if (saveTimer) clearTimeout(saveTimer);
+  try {
+    fs.writeFileSync(MESSAGES_FILE, JSON.stringify({ messages, nextId }), "utf-8");
+  } catch (e) {
+    console.error("[db] Failed to flush messages:", (e as Error).message);
+  }
+}

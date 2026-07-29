@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import { Server } from "socket.io";
 import { setupSocket } from "./socket";
 import { roomExists, hasPassword, getUserCount, getRoomCount, getTotalUsers } from "./rooms";
-import { getStats } from "./db";
+import { getStats, dbReady, flushSync } from "./db";
 
 const PORT = process.env.PORT || 3001;
 const API_VERSION = "1";
@@ -86,25 +86,38 @@ function handleAPI(req: IncomingMessage, res: ServerResponse): boolean {
 
 // ========== 启动 ==========
 
-const httpServer = createServer((req, res) => {
-  if (!handleAPI(req, res)) {
-    // Health check
-    if (req.url === "/" || req.url === "/health") {
-      sendJSON(res, 200, { status: "ok" });
-      return;
+async function start() {
+  await dbReady;
+  console.log("[db] Messages loaded successfully");
+
+  const httpServer = createServer((req, res) => {
+    if (!handleAPI(req, res)) {
+      if (req.url === "/" || req.url === "/health") {
+        sendJSON(res, 200, { status: "ok" });
+        return;
+      }
+      res.writeHead(200);
+      res.end("🍀 四叶草蓝星球 信令服务器");
     }
-    res.writeHead(200);
-    res.end("🍀 四叶草蓝星球 信令服务器");
-  }
-});
+  });
 
-const io = new Server(httpServer, {
-  cors: { origin: "*", methods: ["GET", "POST"] },
-});
+  const io = new Server(httpServer, {
+    cors: { origin: "*", methods: ["GET", "POST"] },
+  });
 
-setupSocket(io);
+  setupSocket(io);
 
-httpServer.listen(PORT, () => {
-  console.log(`🍀 四叶草蓝星球 信令服务器 v${API_VERSION} 运行在 :${PORT}`);
-  console.log(`   REST API: http://localhost:${PORT}/api/v${API_VERSION}/health`);
+  // 优雅退出时刷盘
+  process.on("SIGTERM", () => { flushSync(); process.exit(0); });
+  process.on("SIGINT", () => { flushSync(); process.exit(0); });
+
+  httpServer.listen(PORT, () => {
+    console.log(`🍀 四叶草蓝星球 信令服务器 v${API_VERSION} 运行在 :${PORT}`);
+    console.log(`   REST API: http://localhost:${PORT}/api/v${API_VERSION}/health`);
+  });
+}
+
+start().catch((e) => {
+  console.error("Failed to start server:", e);
+  process.exit(1);
 });
