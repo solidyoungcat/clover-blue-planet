@@ -88,7 +88,11 @@ function handleAPI(req: IncomingMessage, res: ServerResponse): boolean {
 
 const httpServer = createServer((req, res) => {
   if (!handleAPI(req, res)) {
-    // Not an API route — let Socket.IO handle it
+    // Health check
+    if (req.url === "/" || req.url === "/health") {
+      sendJSON(req as any, res as any, 200, { status: "ok" });
+      return;
+    }
     res.writeHead(200);
     res.end("🍀 四叶草蓝星球 信令服务器");
   }
