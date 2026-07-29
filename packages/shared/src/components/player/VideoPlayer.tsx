@@ -46,10 +46,11 @@ export function VideoPlayer({ onFullscreen, roomCode, sendSyncState, onSyncState
     }
   }, [source]);
 
-  // 直连失败 → 走后端流代理（带 Referer）
+  // 直连失败 → 仅对 http(s) URL 走后端流代理
   const handleError = () => {
     const v = videoRef.current;
     if (!v || !source || source.type !== "url" || proxyRetryRef.current) return;
+    if (!source.url!.startsWith("http")) return; // 本地协议无需代理
     proxyRetryRef.current = true;
     const proxyUrl = `/api/v1/stream?url=${encodeURIComponent(source.url!)}`;
     v.src = proxyUrl;

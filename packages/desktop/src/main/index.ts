@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, shell, protocol } from "electron";
 import { exec } from "child_process";
 import { promisify } from "util";
 import path from "path";
@@ -52,7 +52,7 @@ ipcMain.handle("resolve:video", async (_event, url: string) => {
 
   // 如果已经下载过，直接返回
   if (fs.existsSync(outPath) && fs.statSync(outPath).size > 0) {
-    return { url: `http://localhost:4099/api/v1/video/${videoId}.mp4`, cached: true };
+    return { url: `local-video://${outPath.replace(/\\/g, "/")}`, cached: true };
   }
 
   // 优先使用打包的 yt-dlp.exe，其次用系统 Python
@@ -80,7 +80,7 @@ ipcMain.handle("resolve:video", async (_event, url: string) => {
       await execAsync(`${cmd} ${args}`, { timeout: 60000 });
 
       if (fs.existsSync(outPath) && fs.statSync(outPath).size > 0) {
-        return { url: `http://localhost:4099/api/v1/video/${videoId}.mp4` };
+        return { url: `local-video://${outPath.replace(/\\/g, "/")}` };
       }
     } catch {
       // 尝试下一个命令
@@ -103,6 +103,11 @@ ipcMain.handle("shell:openExternal", async (_event, url: string) => {
 });
 
 app.whenReady().then(() => {
+  // 注册本地视频文件协议，避免 CORS 问题
+  protocol.registerFileProtocol("local-video", (request, callback) => {
+    const filePath = decodeURIComponent(request.url.replace("local-video://", ""));
+    callback({ path: filePath });
+  });
   ensureVideoDir();
   createWindow();
 });
