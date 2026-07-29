@@ -124,9 +124,10 @@ export function setupSocket(io: Server) {
         ? d.password
         : undefined;
 
-      createRoom(d.code, password);
+      const room = createRoom(d.code, password);
 
       // 创建者自动加入房间
+      room.users.add(socket.id);
       socket.join(d.code);
       socketRoomMap.set(socket.id, d.code);
 
