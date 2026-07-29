@@ -5,9 +5,6 @@ import { useVideoSync } from "../../hooks/useVideoSync";
 import { SourceSelector } from "./SourceSelector";
 import { PlaybackControls } from "./PlaybackControls";
 
-const VIDEO_EXTS = /\.(mp4|webm|mkv|avi|mov|flv|wmv)($|\?)/i;
-function isVideoUrl(url: string): boolean { return VIDEO_EXTS.test(url); }
-
 interface VideoPlayerProps {
   onFullscreen?: () => void;
   roomCode: string;
@@ -15,8 +12,11 @@ interface VideoPlayerProps {
   onSyncState: (handler: (state: SyncState) => void) => () => void;
 }
 
+const SERVER = (typeof import.meta !== "undefined") ? ((import.meta as any).env?.VITE_SERVER_URL || "http://localhost:3001") : "";
+
 export function VideoPlayer({ onFullscreen, roomCode, sendSyncState, onSyncState }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const proxyRetryRef = useRef(false);
   const { isPlaying, currentTime, playbackRate, volume, source, syncStatus,
     setCurrentTime, setDuration, play, pause } = usePlayerStore();
 
@@ -38,14 +38,26 @@ export function VideoPlayer({ onFullscreen, roomCode, sendSyncState, onSyncState
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !source) return;
+    proxyRetryRef.current = false;
     if (source.type === "file" && source.path) {
       v.src = `file://${source.path}`;
-    } else if (source.type === "url" && source.url && isVideoUrl(source.url)) {
+    } else if (source.type === "url" && source.url) {
       v.src = source.url;
+      v.load();
+      v.play().catch(() => {});
     }
   }, [source]);
 
-  const urlSource = source?.type === "url" ? source.url : undefined;
+  // 直连失败 → 走后端流代理（带 Referer）
+  const handleError = () => {
+    const v = videoRef.current;
+    if (!v || !source || source.type !== "url" || proxyRetryRef.current) return;
+    proxyRetryRef.current = true;
+    const proxyUrl = `${SERVER}/api/v1/stream?url=${encodeURIComponent(source.url!)}`;
+    v.src = proxyUrl;
+    v.load();
+    v.play().catch(() => {});
+  };
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -62,6 +74,9 @@ export function VideoPlayer({ onFullscreen, roomCode, sendSyncState, onSyncState
         )}
         {source && (
           <video ref={videoRef}
+            controls
+            crossOrigin="anonymous"
+            onError={handleError}
             onTimeUpdate={() => { if (videoRef.current) setCurrentTime(videoRef.current.currentTime); }}
             onLoadedMetadata={() => { if (videoRef.current) setDuration(videoRef.current.duration); }}
             onClick={() => isPlaying ? pause() : play()}

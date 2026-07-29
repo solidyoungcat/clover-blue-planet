@@ -5,6 +5,7 @@ import { Server } from "socket.io";
 import { setupSocket } from "./socket";
 import { roomExists, hasPassword, getUserCount, getRoomCount, getTotalUsers } from "./rooms";
 import { getStats, dbReady, flushSync } from "./db";
+import { resolveVideo } from "./resolver";
 
 const PORT = process.env.PORT || 3001;
 const API_VERSION = "1";
@@ -21,7 +22,7 @@ function sendJSON(res: ServerResponse, status: number, data: unknown) {
   res.end(JSON.stringify(data));
 }
 
-function handleAPI(req: IncomingMessage, res: ServerResponse): boolean {
+async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   // CORS preflight
   if (req.method === "OPTIONS") {
     sendJSON(res, 204, {});
@@ -108,6 +109,58 @@ function handleAPI(req: IncomingMessage, res: ServerResponse): boolean {
     return true;
   }
 
+  // GET /api/v1/stream?url=... (视频流代理，带 B站 Referer)
+  if (req.method === "GET" && url.pathname === `/api/v${API_VERSION}/stream`) {
+    const targetUrl = url.searchParams.get("url");
+    if (!targetUrl) {
+      sendJSON(res, 400, { error: "缺少 url 参数" });
+      return true;
+    }
+
+    const client = targetUrl.startsWith("https") ? https : http;
+    const reqHeaders: Record<string, string> = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      "Referer": "https://www.bilibili.com/",
+      "Origin": "https://www.bilibili.com",
+    };
+    client.get(targetUrl, { headers: reqHeaders }, (proxyRes) => {
+      const headers: Record<string, string> = {
+        "Content-Type": proxyRes.headers["content-type"] || "video/mp4",
+        "Access-Control-Allow-Origin": "*",
+        "Accept-Ranges": "bytes",
+      };
+      if (proxyRes.headers["content-length"]) {
+        headers["Content-Length"] = proxyRes.headers["content-length"] as string;
+      }
+      res.writeHead(proxyRes.statusCode || 200, headers);
+      proxyRes.pipe(res);
+    }).on("error", () => {
+      sendJSON(res, 502, { error: "视频流代理失败" });
+    });
+    return true;
+  }
+
+  // GET /api/v1/resolve?url=... (视频链接解析)
+  if (req.method === "GET" && url.pathname === `/api/v${API_VERSION}/resolve`) {
+    const targetUrl = url.searchParams.get("url");
+    if (!targetUrl) {
+      sendJSON(res, 400, { error: "缺少 url 参数" });
+      return true;
+    }
+
+    try {
+      const info = await resolveVideo(targetUrl);
+      if (!info || !info.url) {
+        sendJSON(res, 404, { error: "无法解析该链接" });
+        return true;
+      }
+      sendJSON(res, 200, info);
+    } catch {
+      sendJSON(res, 500, { error: "解析失败" });
+    }
+    return true;
+  }
+
   return false;
 }
 
@@ -117,8 +170,8 @@ async function start() {
   await dbReady;
   console.log("[db] Messages loaded successfully");
 
-  const httpServer = createServer((req, res) => {
-    if (!handleAPI(req, res)) {
+  const httpServer = createServer(async (req, res) => {
+    if (!(await handleAPI(req, res))) {
       if (req.url === "/" || req.url === "/health") {
         sendJSON(res, 200, { status: "ok" });
         return;
