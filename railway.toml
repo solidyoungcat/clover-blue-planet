@@ -1,11 +1,8 @@
 [build]
 builder = "nixpacks"
-buildCommand = "npm install -g pnpm@8 && pnpm install --filter server && pnpm --filter server build"
+buildCommand = "npm install -g pnpm@8 && pnpm install --filter server && cd packages/server && npx tsc"
 
 [deploy]
 startCommand = "node packages/server/dist/index.js"
 healthcheckPath = "/health"
 restartPolicyType = "always"
-
-[deploy.env]
-DATA_DIR = "/data"
