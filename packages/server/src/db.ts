@@ -1,34 +1,13 @@
-import Database from "better-sqlite3";
+import fs from "fs";
 import path from "path";
 
-const DB_PATH = process.env.DB_PATH || path.join(process.cwd(), "data", "clover.db");
+const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
+const MESSAGES_FILE = path.join(DATA_DIR, "messages.json");
 
-// Ensure directory exists
-import fs from "fs";
-fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+// Ensure data directory
+fs.mkdirSync(DATA_DIR, { recursive: true });
 
-const db = new Database(DB_PATH);
-
-// Enable WAL mode for better concurrent performance
-db.pragma("journal_mode = WAL");
-
-// Create tables
-db.exec(`
-  CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    room_code TEXT NOT NULL,
-    sender TEXT NOT NULL,
-    text TEXT NOT NULL,
-    type TEXT NOT NULL DEFAULT 'text',
-    voice_url TEXT,
-    timestamp INTEGER NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room_code, timestamp DESC);
-`);
-
-export interface StoredMessage {
+interface StoredMessage {
   id: number;
   room_code: string;
   sender: string;
@@ -38,11 +17,27 @@ export interface StoredMessage {
   timestamp: number;
 }
 
-// Insert a message
-const insertStmt = db.prepare(`
-  INSERT INTO messages (room_code, sender, text, type, voice_url, timestamp)
-  VALUES (@roomCode, @sender, @text, @type, @voiceUrl, @timestamp)
-`);
+let messages: StoredMessage[] = [];
+let nextId = 1;
+
+// Load from disk
+try {
+  if (fs.existsSync(MESSAGES_FILE)) {
+    const data = JSON.parse(fs.readFileSync(MESSAGES_FILE, "utf-8"));
+    messages = data.messages || [];
+    nextId = data.nextId || 1;
+  }
+} catch {
+  // Start fresh
+}
+
+function saveToDisk() {
+  try {
+    fs.writeFileSync(MESSAGES_FILE, JSON.stringify({ messages, nextId }), "utf-8");
+  } catch (e) {
+    console.error("[db] Failed to save messages:", e);
+  }
+}
 
 export function saveMessage(msg: {
   roomCode: string;
@@ -52,59 +47,45 @@ export function saveMessage(msg: {
   voiceUrl?: string;
   timestamp: number;
 }): void {
-  insertStmt.run({
-    roomCode: msg.roomCode,
+  const stored: StoredMessage = {
+    id: nextId++,
+    room_code: msg.roomCode,
     sender: msg.sender,
     text: msg.text,
     type: msg.type,
-    voiceUrl: msg.voiceUrl || null,
+    voice_url: msg.voiceUrl || null,
     timestamp: msg.timestamp,
-  });
-}
+  };
+  messages.push(stored);
 
-// Get recent messages for a room
-const queryStmt = db.prepare(`
-  SELECT * FROM messages
-  WHERE room_code = @roomCode
-  ORDER BY timestamp DESC
-  LIMIT @limit
-`);
+  // Keep last 1000 per room
+  cleanOldMessages(msg.roomCode);
+  saveToDisk();
+}
 
 export function getRecentMessages(roomCode: string, limit = 100): StoredMessage[] {
-  return queryStmt.all({ roomCode, limit }) as StoredMessage[];
+  return messages
+    .filter((m) => m.room_code === roomCode)
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(0, limit)
+    .reverse();
 }
 
-// Clean old messages (keep last 1000 per room)
-const cleanStmt = db.prepare(`
-  DELETE FROM messages
-  WHERE room_code = @roomCode
-  AND id NOT IN (
-    SELECT id FROM messages
-    WHERE room_code = @roomCode
-    ORDER BY timestamp DESC
-    LIMIT 1000
-  )
-`);
-
-export function cleanOldMessages(roomCode: string): void {
-  cleanStmt.run({ roomCode });
-}
-
-// Get database stats
-export function getStats(): { totalMessages: number; dbSize: string } {
-  const count = (db.prepare("SELECT COUNT(*) as c FROM messages").get() as { c: number }).c;
-  const size = fs.statSync(DB_PATH).size;
-  return { totalMessages: count, dbSize: `${(size / 1024).toFixed(1)} KB` };
-}
-
-// Auto-clean every hour: keep 1000 messages per room
-setInterval(() => {
-  const rooms = db.prepare("SELECT DISTINCT room_code FROM messages").all() as { room_code: string }[];
-  for (const { room_code } of rooms) {
-    cleanOldMessages(room_code);
+function cleanOldMessages(roomCode: string): void {
+  const roomMessages = messages.filter((m) => m.room_code === roomCode);
+  if (roomMessages.length > 1000) {
+    const toKeep = roomMessages
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 1000)
+      .map((m) => m.id);
+    messages = messages.filter(
+      (m) => m.room_code !== roomCode || toKeep.includes(m.id)
+    );
   }
-  // Vacuum to reclaim disk space
-  db.pragma("incremental_vacuum");
-}, 3600_000);
+}
 
-export default db;
+export function getStats(): { totalMessages: number } {
+  return { totalMessages: messages.length };
+}
+
+export { messages as _messages };
