@@ -47,6 +47,10 @@ export function joinRoom(
     return { error: "密码错误" };
   }
 
+  // 房间最多 2 人（双人同步观影场景）
+  if (room.users.size >= 2) {
+    return { error: "房间已满（最多 2 人）" };
+  }
   room.users.add(socketId);
 
   const userIds = Array.from(room.users);

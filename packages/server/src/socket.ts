@@ -223,6 +223,7 @@ export function setupSocket(io: Server) {
       const d = data as Record<string, unknown>;
       if (!checkRateLimit(socket.id, "sync")) return;
       if (typeof d.roomCode !== "string" || !ROOM_CODE_RE.test(d.roomCode)) return;
+      if (socketRoomMap.get(socket.id) !== d.roomCode) return;
       if (!isValidSyncState(d.state)) return;
       socket.to(d.roomCode).emit("sync:state", d.state);
     });
@@ -232,6 +233,7 @@ export function setupSocket(io: Server) {
       const d = data as Record<string, unknown>;
       if (!checkRateLimit(socket.id, "pet")) return;
       if (typeof d.roomCode !== "string" || !ROOM_CODE_RE.test(d.roomCode)) return;
+      if (socketRoomMap.get(socket.id) !== d.roomCode) return;
       if (!isValidPetState(d.petState)) return;
       socket.to(d.roomCode).emit("pet:update", d.petState);
     });
