@@ -1,6 +1,9 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from "electron";
+import { exec } from "child_process";
+import { promisify } from "util";
 import path from "path";
 
+const execAsync = promisify(exec);
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow() {
@@ -19,7 +22,46 @@ function createWindow() {
   });
 
   mainWindow.loadURL("http://localhost:3000");
+  mainWindow.webContents.openDevTools();
 }
+
+// 视频解析 — 在主进程中运行 yt-dlp
+ipcMain.handle("resolve:video", async (_event, url: string) => {
+  const isWebpage = !/\.(mp4|webm|mkv|avi|mov|flv|wmv)($|\?)/i.test(url);
+  if (!isWebpage) return { url }; // 已经是视频直链
+
+  const commands = [
+    "python3 -m yt_dlp",
+    "python -m yt_dlp",
+    "yt-dlp",
+  ];
+
+  for (const cmd of commands) {
+    try {
+      const args = [
+        `"${url}"`,
+        "--format", "best[ext=mp4]/best",
+        "--get-url",
+        "--get-title",
+        "--no-playlist",
+        "--socket-timeout", "20",
+      ].join(" ");
+
+      const { stdout } = await execAsync(`${cmd} ${args}`, { timeout: 25000 });
+      const lines = stdout.trim().split("\n");
+      const streamUrl = lines.pop()?.trim();
+      const title = lines.join("\n").trim() || undefined;
+
+      if (streamUrl && streamUrl.startsWith("http")) {
+        return { url: streamUrl, title };
+      }
+    } catch {
+      // 尝试下一个
+    }
+  }
+
+  return { url: null, error: "无法解析" };
+});
 
 ipcMain.handle("dialog:openFile", async () => {
   const result = await dialog.showOpenDialog(mainWindow!, {
