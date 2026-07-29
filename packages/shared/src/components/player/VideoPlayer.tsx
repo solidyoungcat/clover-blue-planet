@@ -32,6 +32,17 @@ export function VideoPlayer({ onFullscreen, roomCode, sendSyncState, onSyncState
   useEffect(() => { if (videoRef.current) videoRef.current.playbackRate = playbackRate; }, [playbackRate]);
   useEffect(() => { if (videoRef.current) videoRef.current.volume = volume; }, [volume]);
 
+  // 同步 source 到 video 元素 src
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !source) return;
+    if (source.type === "file" && source.path) {
+      v.src = `file://${source.path}`;
+    } else if (source.type === "url" && source.url) {
+      v.src = source.url;
+    }
+  }, [source]);
+
   return (
     <div className="flex flex-col flex-1 min-h-0">
       <SourceSelector />

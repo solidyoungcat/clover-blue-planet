@@ -57,7 +57,13 @@ export function MessageInput({ onSend }: MessageInputProps) {
 
         <VoiceRecorder
           onRecorded={(blob) => {
-            onSend("[语音消息]", "voice");
+            // 将 Blob 转为 Base64 以通过 Socket.IO 传输
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const base64 = reader.result as string;
+              onSend(base64, "voice");
+            };
+            reader.readAsDataURL(blob);
           }}
         />
 
