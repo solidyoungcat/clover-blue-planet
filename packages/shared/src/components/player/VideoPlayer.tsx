@@ -5,13 +5,6 @@ import { useVideoSync } from "../../hooks/useVideoSync";
 import { SourceSelector } from "./SourceSelector";
 import { PlaybackControls } from "./PlaybackControls";
 
-// 判断是否为内嵌播放器链接（非视频直链）
-function isEmbedUrl(url: string): boolean {
-  return url.includes("player.bilibili.com") ||
-         url.includes("youtube.com/embed") ||
-         url.includes("player.bilibili.com"); // B站 embed
-}
-
 const VIDEO_EXTS = /\.(mp4|webm|mkv|avi|mov|flv|wmv)($|\?)/i;
 function isVideoUrl(url: string): boolean { return VIDEO_EXTS.test(url); }
 
@@ -53,7 +46,6 @@ export function VideoPlayer({ onFullscreen, roomCode, sendSyncState, onSyncState
   }, [source]);
 
   const urlSource = source?.type === "url" ? source.url : undefined;
-  const showIframe = !!(urlSource && (isEmbedUrl(urlSource) || !isVideoUrl(urlSource)));
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -68,16 +60,7 @@ export function VideoPlayer({ onFullscreen, roomCode, sendSyncState, onSyncState
             </p>
           </div>
         )}
-        {showIframe && (
-          <iframe
-            src={urlSource}
-            allow="autoplay; fullscreen"
-            allowFullScreen
-            referrerPolicy="no-referrer"
-            className="w-full h-full border-0"
-          />
-        )}
-        {source && !showIframe && (
+        {source && (
           <video ref={videoRef}
             onTimeUpdate={() => { if (videoRef.current) setCurrentTime(videoRef.current.currentTime); }}
             onLoadedMetadata={() => { if (videoRef.current) setDuration(videoRef.current.duration); }}
