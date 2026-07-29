@@ -13,6 +13,7 @@ export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "di
 
 export function useSocket(roomCode: string) {
   const socketRef = useRef<Socket | null>(null);
+  const hasJoinedRef = useRef(false);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [needPassword, setNeedPassword] = useState(false);
@@ -34,6 +35,10 @@ export function useSocket(roomCode: string) {
     socket.on("connect", () => {
       setConnectionStatus("connected");
       setErrorMessage(null);
+      // 仅重连时（已加入过房间）自动 re-join
+      if (roomCode && hasJoinedRef.current) {
+        socket.emit(ClientEvents.ROOM_JOIN, { code: roomCode });
+      }
     });
 
     socket.io.on("reconnect_attempt", () => {
@@ -91,6 +96,7 @@ export function useSocket(roomCode: string) {
 
   const createRoom = useCallback(
     (code: string, password?: string) => {
+      hasJoinedRef.current = true;
       socketRef.current?.emit(ClientEvents.ROOM_CREATE, { code, password });
     },
     []
@@ -98,6 +104,7 @@ export function useSocket(roomCode: string) {
 
   const joinRoom = useCallback((code: string, password?: string) => {
     setNeedPassword(false);
+    hasJoinedRef.current = true;
     socketRef.current?.emit(ClientEvents.ROOM_JOIN, { code, password });
   }, []);
 
