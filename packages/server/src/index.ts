@@ -1,6 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import https from "https";
 import http from "http";
+import fs from "fs";
+import path from "path";
+import os from "os";
 import { Server } from "socket.io";
 import { setupSocket } from "./socket";
 import { roomExists, hasPassword, getUserCount, getRoomCount, getTotalUsers } from "./rooms";
@@ -30,6 +33,27 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
   }
 
   const url = new URL(req.url || "/", `http://localhost:${PORT}`);
+
+  // GET /api/v1/video/:file (本地视频文件服务)
+  const videoMatch = url.pathname.match(new RegExp(`^/api/v${API_VERSION}/video/([\\w.-]+)$`));
+  if (req.method === "GET" && videoMatch) {
+    const videoDir = path.join(os.tmpdir(), "clover-videos");
+    const filePath = path.join(videoDir, videoMatch[1]);
+    if (!filePath.startsWith(videoDir)) { sendJSON(res, 403, { error: "禁止访问" }); return true; }
+    try {
+      const stat = fs.statSync(filePath);
+      res.writeHead(200, {
+        "Content-Type": "video/mp4",
+        "Content-Length": stat.size,
+        "Accept-Ranges": "bytes",
+        "Access-Control-Allow-Origin": "*",
+      });
+      fs.createReadStream(filePath).pipe(res);
+    } catch {
+      sendJSON(res, 404, { error: "视频文件不存在" });
+    }
+    return true;
+  }
 
   // GET /api/v1/health
   if (req.method === "GET" && url.pathname === `/api/v${API_VERSION}/health`) {

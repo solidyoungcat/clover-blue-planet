@@ -2,9 +2,18 @@ import { app, BrowserWindow, ipcMain, dialog, shell } from "electron";
 import { exec } from "child_process";
 import { promisify } from "util";
 import path from "path";
+import fs from "fs";
+import os from "os";
 
 const execAsync = promisify(exec);
 let mainWindow: BrowserWindow | null = null;
+
+// 视频临时下载目录（与后端 data/ 同级，方便后端静态服务）
+const VIDEO_DIR = path.join(os.tmpdir(), "clover-videos");
+
+function ensureVideoDir() {
+  if (!fs.existsSync(VIDEO_DIR)) fs.mkdirSync(VIDEO_DIR, { recursive: true });
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -25,10 +34,21 @@ function createWindow() {
   mainWindow.webContents.openDevTools();
 }
 
-// 视频解析 — 在主进程中运行 yt-dlp
+// 视频解析 — 下载到本地文件，返回后端静态 URL
 ipcMain.handle("resolve:video", async (_event, url: string) => {
   const isWebpage = !/\.(mp4|webm|mkv|avi|mov|flv|wmv)($|\?)/i.test(url);
-  if (!isWebpage) return { url }; // 已经是视频直链
+  if (!isWebpage) return { url };
+
+  ensureVideoDir();
+
+  // 提取视频 ID 作为文件名
+  const videoId = url.match(/BV[\w]+/)?.[0] || Date.now().toString(36);
+  const outPath = path.join(VIDEO_DIR, `${videoId}.mp4`);
+
+  // 如果已经下载过，直接返回
+  if (fs.existsSync(outPath) && fs.statSync(outPath).size > 0) {
+    return { url: `http://localhost:4099/api/v1/video/${videoId}.mp4`, cached: true };
+  }
 
   const commands = [
     "python3 -m yt_dlp",
@@ -40,23 +60,21 @@ ipcMain.handle("resolve:video", async (_event, url: string) => {
     try {
       const args = [
         `"${url}"`,
-        "--format", "best[ext=mp4]/best",
-        "--get-url",
-        "--get-title",
+        `-o "${outPath}"`,
+        "--format", "bv*+ba/best",
+        "--merge-output-format", "mp4",
         "--no-playlist",
         "--socket-timeout", "20",
+        "--no-progress",
       ].join(" ");
 
-      const { stdout } = await execAsync(`${cmd} ${args}`, { timeout: 25000 });
-      const lines = stdout.trim().split("\n");
-      const streamUrl = lines.pop()?.trim();
-      const title = lines.join("\n").trim() || undefined;
+      await execAsync(`${cmd} ${args}`, { timeout: 60000 });
 
-      if (streamUrl && streamUrl.startsWith("http")) {
-        return { url: streamUrl, title };
+      if (fs.existsSync(outPath) && fs.statSync(outPath).size > 0) {
+        return { url: `http://localhost:4099/api/v1/video/${videoId}.mp4` };
       }
     } catch {
-      // 尝试下一个
+      // 尝试下一个命令
     }
   }
 
@@ -75,6 +93,9 @@ ipcMain.handle("shell:openExternal", async (_event, url: string) => {
   await shell.openExternal(url);
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  ensureVideoDir();
+  createWindow();
+});
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
