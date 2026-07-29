@@ -126,6 +126,10 @@ export function setupSocket(io: Server) {
 
       createRoom(d.code, password);
 
+      // 创建者自动加入房间
+      socket.join(d.code);
+      socketRoomMap.set(socket.id, d.code);
+
       socket.emit("room:created", { code: d.code, hasPassword: !!password });
       console.log(`[room:created] ${d.code} ${password ? "(加密)" : "(公开)"}`);
     });
@@ -208,7 +212,10 @@ export function setupSocket(io: Server) {
       });
 
       const partner = getPartnerId(d.roomCode, socket.id);
-      if (partner) io.to(partner).emit("chat:message", d.message);
+      if (partner) {
+        // 转发时强制覆写 sender，防止客户端伪造身份
+        io.to(partner).emit("chat:message", { ...msg, sender: "partner" });
+      }
     });
 
     socket.on("sync:state", (data: unknown) => {
