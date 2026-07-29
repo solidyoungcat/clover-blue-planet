@@ -1,0 +1,65 @@
+diff --git a/packages/server/src/rooms.ts b/packages/server/src/rooms.ts
+index 5ebb95e..bb5e7f3 100644
+--- a/packages/server/src/rooms.ts
++++ b/packages/server/src/rooms.ts
+@@ -40,20 +40,24 @@ export function joinRoom(
+   }
+ 
+   // 密码验证
+   if (room.passwordHash && !password) {
+     return { error: "NEED_PASSWORD" };
+   }
+   if (room.passwordHash && password && hashPassword(password, room.passwordSalt!).hash !== room.passwordHash) {
+     return { error: "密码错误" };
+   }
+ 
++  // 房间最多 2 人（双人同步观影场景）
++  if (room.users.size >= 2) {
++    return { error: "房间已满（最多 2 人）" };
++  }
+   room.users.add(socketId);
+ 
+   const userIds = Array.from(room.users);
+   const partnerId = userIds.length >= 2 ? userIds.find((id) => id !== socketId) ?? null : null;
+ 
+   return { room, partnerId };
+ }
+ 
+ export function hasPassword(code: string): boolean {
+   const room = roomMap.get(code);
+diff --git a/packages/server/src/socket.ts b/packages/server/src/socket.ts
+index 942d169..bb7f94a 100644
+--- a/packages/server/src/socket.ts
++++ b/packages/server/src/socket.ts
+@@ -216,29 +216,31 @@ export function setupSocket(io: Server) {
+         // 转发时强制覆写 sender，防止客户端伪造身份
+         io.to(partner).emit("chat:message", { ...msg, sender: "partner" });
+       }
+     });
+ 
+     socket.on("sync:state", (data: unknown) => {
+       if (!data || typeof data !== "object") return;
+       const d = data as Record<string, unknown>;
+       if (!checkRateLimit(socket.id, "sync")) return;
+       if (typeof d.roomCode !== "string" || !ROOM_CODE_RE.test(d.roomCode)) return;
++      if (socketRoomMap.get(socket.id) !== d.roomCode) return;
+       if (!isValidSyncState(d.state)) return;
+       socket.to(d.roomCode).emit("sync:state", d.state);
+     });
+ 
+     socket.on("pet:update", (data: unknown) => {
+       if (!data || typeof data !== "object") return;
+       const d = data as Record<string, unknown>;
+       if (!checkRateLimit(socket.id, "pet")) return;
+       if (typeof d.roomCode !== "string" || !ROOM_CODE_RE.test(d.roomCode)) return;
++      if (socketRoomMap.get(socket.id) !== d.roomCode) return;
+       if (!isValidPetState(d.petState)) return;
+       socket.to(d.roomCode).emit("pet:update", d.petState);
+     });
+ 
+     socket.on("room:leave", (code: unknown) => {
+       if (typeof code !== "string") return;
+       leaveRoom(code, socket.id);
+       socket.leave(code);
+       socket.emit("room:left");
+       console.log(`[room:leave] ${socket.id} ← ${code}`);

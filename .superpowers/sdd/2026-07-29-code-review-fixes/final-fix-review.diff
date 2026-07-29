@@ -1,0 +1,30 @@
+diff --git a/packages/server/src/socket.ts b/packages/server/src/socket.ts
+index bb7f94a..f20b1b5 100644
+--- a/packages/server/src/socket.ts
++++ b/packages/server/src/socket.ts
+@@ -117,23 +117,24 @@ export function setupSocket(io: Server) {
+ 
+       if (roomExists(d.code)) {
+         socket.emit("error", { message: "房间码已被使用，请换一个" });
+         return;
+       }
+ 
+       const password = typeof d.password === "string" && d.password.length > 0
+         ? d.password
+         : undefined;
+ 
+-      createRoom(d.code, password);
++      const room = createRoom(d.code, password);
+ 
+       // 创建者自动加入房间
++      room.users.add(socket.id);
+       socket.join(d.code);
+       socketRoomMap.set(socket.id, d.code);
+ 
+       socket.emit("room:created", { code: d.code, hasPassword: !!password });
+       console.log(`[room:created] ${d.code} ${password ? "(加密)" : "(公开)"}`);
+     });
+ 
+     // --- 检查房间 ---
+     socket.on("room:check", (code: unknown) => {
+       if (typeof code !== "string" || !ROOM_CODE_RE.test(code)) {

@@ -1,0 +1,55 @@
+diff --git a/packages/server/src/socket.ts b/packages/server/src/socket.ts
+index b23e52c..942d169 100644
+--- a/packages/server/src/socket.ts
++++ b/packages/server/src/socket.ts
+@@ -119,20 +119,24 @@ export function setupSocket(io: Server) {
+         socket.emit("error", { message: "房间码已被使用，请换一个" });
+         return;
+       }
+ 
+       const password = typeof d.password === "string" && d.password.length > 0
+         ? d.password
+         : undefined;
+ 
+       createRoom(d.code, password);
+ 
++      // 创建者自动加入房间
++      socket.join(d.code);
++      socketRoomMap.set(socket.id, d.code);
++
+       socket.emit("room:created", { code: d.code, hasPassword: !!password });
+       console.log(`[room:created] ${d.code} ${password ? "(加密)" : "(公开)"}`);
+     });
+ 
+     // --- 检查房间 ---
+     socket.on("room:check", (code: unknown) => {
+       if (typeof code !== "string" || !ROOM_CODE_RE.test(code)) {
+         socket.emit("room:check-result", { exists: false, reason: "invalid" });
+         return;
+       }
+@@ -201,21 +205,24 @@ export function setupSocket(io: Server) {
+       saveMessage({
+         roomCode: d.roomCode as string,
+         sender: msg.sender,
+         text: msg.text,
+         type: msg.type,
+         voiceUrl: msg.voiceUrl,
+         timestamp: msg.timestamp,
+       });
+ 
+       const partner = getPartnerId(d.roomCode, socket.id);
+-      if (partner) io.to(partner).emit("chat:message", d.message);
++      if (partner) {
++        // 转发时强制覆写 sender，防止客户端伪造身份
++        io.to(partner).emit("chat:message", { ...msg, sender: "partner" });
++      }
+     });
+ 
+     socket.on("sync:state", (data: unknown) => {
+       if (!data || typeof data !== "object") return;
+       const d = data as Record<string, unknown>;
+       if (!checkRateLimit(socket.id, "sync")) return;
+       if (typeof d.roomCode !== "string" || !ROOM_CODE_RE.test(d.roomCode)) return;
+       if (!isValidSyncState(d.state)) return;
+       socket.to(d.roomCode).emit("sync:state", d.state);
+     });

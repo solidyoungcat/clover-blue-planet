@@ -1,0 +1,81 @@
+diff --git a/packages/shared/src/hooks/useSocket.ts b/packages/shared/src/hooks/useSocket.ts
+index 619a7bb..541e811 100644
+--- a/packages/shared/src/hooks/useSocket.ts
++++ b/packages/shared/src/hooks/useSocket.ts
+@@ -6,20 +6,21 @@ import { ClientEvents, ServerEvents, API_VERSION } from "../types/messages";
+ import type { SyncState } from "../lib/sync";
+ 
+ const SERVER_URL =
+   (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_SERVER_URL) ||
+   "http://localhost:3001";
+ 
+ export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "disconnected";
+ 
+ export function useSocket(roomCode: string) {
+   const socketRef = useRef<Socket | null>(null);
++  const hasJoinedRef = useRef(false);
+   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
+   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+   const [needPassword, setNeedPassword] = useState(false);
+   const setPartnerOnline = useRoomStore((s) => s.setPartnerOnline);
+   const addMessage = useChatStore((s) => s.addMessage);
+ 
+   useEffect(() => {
+     const socket = io(SERVER_URL, {
+       autoConnect: false,
+       query: { v: String(API_VERSION) },
+@@ -27,20 +28,24 @@ export function useSocket(roomCode: string) {
+       reconnectionAttempts: 10,
+       reconnectionDelay: 1000,
+       reconnectionDelayMax: 10000,
+     });
+ 
+     socketRef.current = socket;
+ 
+     socket.on("connect", () => {
+       setConnectionStatus("connected");
+       setErrorMessage(null);
++      // 仅重连时（已加入过房间）自动 re-join
++      if (roomCode && hasJoinedRef.current) {
++        socket.emit(ClientEvents.ROOM_JOIN, { code: roomCode });
++      }
+     });
+ 
+     socket.io.on("reconnect_attempt", () => {
+       setConnectionStatus("reconnecting");
+     });
+ 
+     socket.on("disconnect", (reason) => {
+       if (reason === "io server disconnect") {
+         setConnectionStatus("disconnected");
+       } else {
+@@ -84,27 +89,29 @@ export function useSocket(roomCode: string) {
+ 
+     socket.connect();
+ 
+     return () => {
+       socket.disconnect();
+     };
+   }, [roomCode]);
+ 
+   const createRoom = useCallback(
+     (code: string, password?: string) => {
++      hasJoinedRef.current = true;
+       socketRef.current?.emit(ClientEvents.ROOM_CREATE, { code, password });
+     },
+     []
+   );
+ 
+   const joinRoom = useCallback((code: string, password?: string) => {
+     setNeedPassword(false);
++    hasJoinedRef.current = true;
+     socketRef.current?.emit(ClientEvents.ROOM_JOIN, { code, password });
+   }, []);
+ 
+   const checkRoom = useCallback(
+     (code: string, callback: (result: { exists: boolean; hasPassword: boolean; userCount: number }) => void) => {
+       const handler = (result: any) => {
+         callback(result);
+         socketRef.current?.off(ServerEvents.ROOM_CHECK_RESULT, handler);
+       };
+       socketRef.current?.on(ServerEvents.ROOM_CHECK_RESULT, handler);

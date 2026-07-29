@@ -1,0 +1,219 @@
+# Task 5 Brief — 存储层：异步 I/O + 防抖写盘
+
+## Global Constraints
+- 不引入任何原生 C++ 依赖
+- `saveMessage` 和 `getRecentMessages` 函数签名（参数和返回值）保持不变
+- 完成后运行 `cd D:/clover-blue-planet && pnpm --filter server build` 验证通过
+
+## 改动
+
+### 修改文件 A: `packages/server/src/db.ts`（完整重写）
+
+将原文件完整替换为以下内容：
+
+```typescript
+import fs from "fs";
+import path from "path";
+
+const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
+const MESSAGES_FILE = path.join(DATA_DIR, "messages.json");
+
+interface StoredMessage {
+  id: number;
+  room_code: string;
+  sender: string;
+  text: string;
+  type: string;
+  voice_url: string | null;
+  timestamp: number;
+}
+
+let messages: StoredMessage[] = [];
+let nextId = 1;
+
+// ========== 初始化（异步） ==========
+
+export const dbReady: Promise<void> = (async () => {
+  try {
+    await fs.promises.mkdir(DATA_DIR, { recursive: true });
+    if (fs.existsSync(MESSAGES_FILE)) {
+      const raw = await fs.promises.readFile(MESSAGES_FILE, "utf-8");
+      const data = JSON.parse(raw);
+      messages = data.messages || [];
+      nextId = data.nextId || 1;
+    }
+  } catch (e) {
+    console.error("[db] Failed to load messages, starting fresh:", (e as Error).message);
+  }
+})();
+
+// ========== 防抖写盘 ==========
+
+let saveTimer: NodeJS.Timeout | null = null;
+
+function scheduleSave() {
+  if (saveTimer) return; // 已有定时器，等待触发
+  saveTimer = setTimeout(async () => {
+    saveTimer = null;
+    try {
+      await fs.promises.writeFile(
+        MESSAGES_FILE,
+        JSON.stringify({ messages, nextId }),
+        "utf-8",
+      );
+    } catch (e) {
+      console.error("[db] Failed to save messages:", (e as Error).message);
+    }
+  }, 500); // 500ms 防抖窗口
+}
+
+// ========== 公开 API（接口不变） ==========
+
+export function saveMessage(msg: {
+  roomCode: string;
+  sender: "me" | "partner";
+  text: string;
+  type: string;
+  voiceUrl?: string;
+  timestamp: number;
+}): void {
+  const stored: StoredMessage = {
+    id: nextId++,
+    room_code: msg.roomCode,
+    sender: msg.sender,
+    text: msg.text,
+    type: msg.type,
+    voice_url: msg.voiceUrl || null,
+    timestamp: msg.timestamp,
+  };
+  messages.push(stored);
+
+  // 保持每房间最多 1000 条
+  trimRoomMessages(msg.roomCode);
+
+  // 异步防抖写盘（不阻塞事件循环）
+  scheduleSave();
+}
+
+export function getRecentMessages(roomCode: string, limit = 100): StoredMessage[] {
+  return messages
+    .filter((m) => m.room_code === roomCode)
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(0, limit)
+    .reverse();
+}
+
+export function getStats(): { totalMessages: number } {
+  return { totalMessages: messages.length };
+}
+
+// ========== 内部辅助 ==========
+
+function trimRoomMessages(roomCode: string): void {
+  const roomMsgs = messages.filter((m) => m.room_code === roomCode);
+  if (roomMsgs.length > 1000) {
+    const toKeep = new Set(
+      roomMsgs
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, 1000)
+        .map((m) => m.id),
+    );
+    messages = messages.filter(
+      (m) => m.room_code !== roomCode || toKeep.has(m.id),
+    );
+  }
+}
+
+// 紧急退出时同步刷盘（供 process.on('exit') 调用）
+export function flushSync(): void {
+  if (saveTimer) clearTimeout(saveTimer);
+  try {
+    fs.writeFileSync(MESSAGES_FILE, JSON.stringify({ messages, nextId }), "utf-8");
+  } catch (e) {
+    console.error("[db] Failed to flush messages:", (e as Error).message);
+  }
+}
+```
+
+### 修改文件 B: `packages/server/src/index.ts`
+
+将模块顶层代码包装为 async start() 函数，等待 dbReady，并注册退出刷盘。
+
+找到：
+```typescript
+const httpServer = createServer((req, res) => {
+  if (!handleAPI(req, res)) {
+    // Health check
+    if (req.url === "/" || req.url === "/health") {
+      sendJSON(res, 200, { status: "ok" });
+      return;
+    }
+    res.writeHead(200);
+    res.end("🍀 四叶草蓝星球 信令服务器");
+  }
+});
+
+const io = new Server(httpServer, {
+  cors: { origin: "*", methods: ["GET", "POST"] },
+});
+
+setupSocket(io);
+
+httpServer.listen(PORT, () => {
+  console.log(`🍀 四叶草蓝星球 信令服务器 v${API_VERSION} 运行在 :${PORT}`);
+  console.log(`   REST API: http://localhost:${PORT}/api/v${API_VERSION}/health`);
+});
+```
+
+替换为：
+```typescript
+async function start() {
+  await dbReady;
+  console.log("[db] Messages loaded successfully");
+
+  const httpServer = createServer((req, res) => {
+    if (!handleAPI(req, res)) {
+      if (req.url === "/" || req.url === "/health") {
+        sendJSON(res, 200, { status: "ok" });
+        return;
+      }
+      res.writeHead(200);
+      res.end("🍀 四叶草蓝星球 信令服务器");
+    }
+  });
+
+  const io = new Server(httpServer, {
+    cors: { origin: "*", methods: ["GET", "POST"] },
+  });
+
+  setupSocket(io);
+
+  // 优雅退出时刷盘
+  process.on("SIGTERM", () => { flushSync(); process.exit(0); });
+  process.on("SIGINT", () => { flushSync(); process.exit(0); });
+
+  httpServer.listen(PORT, () => {
+    console.log(`🍀 四叶草蓝星球 信令服务器 v${API_VERSION} 运行在 :${PORT}`);
+    console.log(`   REST API: http://localhost:${PORT}/api/v${API_VERSION}/health`);
+  });
+}
+
+start().catch((e) => {
+  console.error("Failed to start server:", e);
+  process.exit(1);
+});
+```
+
+同时在文件顶部的 import 区域，将：
+```typescript
+import { getStats } from "./db";
+```
+替换为：
+```typescript
+import { getStats, dbReady, flushSync } from "./db";
+```
+
+## 验证
+```bash
+cd D:/clover-blue-planet && pnpm --filter server build
+```

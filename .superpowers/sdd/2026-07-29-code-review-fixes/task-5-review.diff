@@ -1,0 +1,241 @@
+diff --git a/packages/server/src/db.ts b/packages/server/src/db.ts
+index d434db3..399778d 100644
+--- a/packages/server/src/db.ts
++++ b/packages/server/src/db.ts
+@@ -1,91 +1,121 @@
+ import fs from "fs";
+ import path from "path";
+ 
+ const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
+ const MESSAGES_FILE = path.join(DATA_DIR, "messages.json");
+ 
+-// Ensure data directory
+-fs.mkdirSync(DATA_DIR, { recursive: true });
+-
+ interface StoredMessage {
+   id: number;
+   room_code: string;
+   sender: string;
+   text: string;
+   type: string;
+   voice_url: string | null;
+   timestamp: number;
+ }
+ 
+ let messages: StoredMessage[] = [];
+ let nextId = 1;
+ 
+-// Load from disk
+-try {
+-  if (fs.existsSync(MESSAGES_FILE)) {
+-    const data = JSON.parse(fs.readFileSync(MESSAGES_FILE, "utf-8"));
+-    messages = data.messages || [];
+-    nextId = data.nextId || 1;
+-  }
+-} catch {
+-  // Start fresh
+-}
++// ========== 初始化（异步） ==========
+ 
+-function saveToDisk() {
++export const dbReady: Promise<void> = (async () => {
+   try {
+-    fs.writeFileSync(MESSAGES_FILE, JSON.stringify({ messages, nextId }), "utf-8");
++    await fs.promises.mkdir(DATA_DIR, { recursive: true });
++    if (fs.existsSync(MESSAGES_FILE)) {
++      const raw = await fs.promises.readFile(MESSAGES_FILE, "utf-8");
++      const data = JSON.parse(raw);
++      messages = data.messages || [];
++      nextId = data.nextId || 1;
++    }
+   } catch (e) {
+-    console.error("[db] Failed to save messages:", e);
++    console.error("[db] Failed to load messages, starting fresh:", (e as Error).message);
+   }
++})();
++
++// ========== 防抖写盘 ==========
++
++let saveTimer: NodeJS.Timeout | null = null;
++
++function scheduleSave() {
++  if (saveTimer) return; // 已有定时器，等待触发
++  saveTimer = setTimeout(async () => {
++    saveTimer = null;
++    try {
++      await fs.promises.writeFile(
++        MESSAGES_FILE,
++        JSON.stringify({ messages, nextId }),
++        "utf-8",
++      );
++    } catch (e) {
++      console.error("[db] Failed to save messages:", (e as Error).message);
++    }
++  }, 500); // 500ms 防抖窗口
+ }
+ 
++// ========== 公开 API（接口不变） ==========
++
+ export function saveMessage(msg: {
+   roomCode: string;
+   sender: "me" | "partner";
+   text: string;
+   type: string;
+   voiceUrl?: string;
+   timestamp: number;
+ }): void {
+   const stored: StoredMessage = {
+     id: nextId++,
+     room_code: msg.roomCode,
+     sender: msg.sender,
+     text: msg.text,
+     type: msg.type,
+     voice_url: msg.voiceUrl || null,
+     timestamp: msg.timestamp,
+   };
+   messages.push(stored);
+ 
+-  // Keep last 1000 per room
+-  cleanOldMessages(msg.roomCode);
+-  saveToDisk();
++  // 保持每房间最多 1000 条
++  trimRoomMessages(msg.roomCode);
++
++  // 异步防抖写盘（不阻塞事件循环）
++  scheduleSave();
+ }
+ 
+ export function getRecentMessages(roomCode: string, limit = 100): StoredMessage[] {
+   return messages
+     .filter((m) => m.room_code === roomCode)
+     .sort((a, b) => b.timestamp - a.timestamp)
+     .slice(0, limit)
+     .reverse();
+ }
+ 
+-function cleanOldMessages(roomCode: string): void {
+-  const roomMessages = messages.filter((m) => m.room_code === roomCode);
+-  if (roomMessages.length > 1000) {
+-    const toKeep = roomMessages
+-      .sort((a, b) => b.timestamp - a.timestamp)
+-      .slice(0, 1000)
+-      .map((m) => m.id);
++export function getStats(): { totalMessages: number } {
++  return { totalMessages: messages.length };
++}
++
++// ========== 内部辅助 ==========
++
++function trimRoomMessages(roomCode: string): void {
++  const roomMsgs = messages.filter((m) => m.room_code === roomCode);
++  if (roomMsgs.length > 1000) {
++    const toKeep = new Set(
++      roomMsgs
++        .sort((a, b) => b.timestamp - a.timestamp)
++        .slice(0, 1000)
++        .map((m) => m.id),
++    );
+     messages = messages.filter(
+-      (m) => m.room_code !== roomCode || toKeep.includes(m.id)
++      (m) => m.room_code !== roomCode || toKeep.has(m.id),
+     );
+   }
+ }
+ 
+-export function getStats(): { totalMessages: number } {
+-  return { totalMessages: messages.length };
++// 紧急退出时同步刷盘（供 process.on('exit') 调用）
++export function flushSync(): void {
++  if (saveTimer) clearTimeout(saveTimer);
++  try {
++    fs.writeFileSync(MESSAGES_FILE, JSON.stringify({ messages, nextId }), "utf-8");
++  } catch (e) {
++    console.error("[db] Failed to flush messages:", (e as Error).message);
++  }
+ }
+-
+-export { messages as _messages };
+diff --git a/packages/server/src/index.ts b/packages/server/src/index.ts
+index f968487..a0e21d8 100644
+--- a/packages/server/src/index.ts
++++ b/packages/server/src/index.ts
+@@ -1,15 +1,15 @@
+ import { createServer, type IncomingMessage, type ServerResponse } from "http";
+ import { Server } from "socket.io";
+ import { setupSocket } from "./socket";
+ import { roomExists, hasPassword, getUserCount, getRoomCount, getTotalUsers } from "./rooms";
+-import { getStats } from "./db";
++import { getStats, dbReady, flushSync } from "./db";
+ 
+ const PORT = process.env.PORT || 3001;
+ const API_VERSION = "1";
+ 
+ // ========== REST API 路由 ==========
+ 
+ function sendJSON(res: ServerResponse, status: number, data: unknown) {
+   res.writeHead(status, {
+     "Content-Type": "application/json",
+     "Access-Control-Allow-Origin": "*",
+@@ -79,32 +79,45 @@ function handleAPI(req: IncomingMessage, res: ServerResponse): boolean {
+       }
+     });
+     return true;
+   }
+ 
+   return false;
+ }
+ 
+ // ========== 启动 ==========
+ 
+-const httpServer = createServer((req, res) => {
+-  if (!handleAPI(req, res)) {
+-    // Health check
+-    if (req.url === "/" || req.url === "/health") {
+-      sendJSON(res, 200, { status: "ok" });
+-      return;
++async function start() {
++  await dbReady;
++  console.log("[db] Messages loaded successfully");
++
++  const httpServer = createServer((req, res) => {
++    if (!handleAPI(req, res)) {
++      if (req.url === "/" || req.url === "/health") {
++        sendJSON(res, 200, { status: "ok" });
++        return;
++      }
++      res.writeHead(200);
++      res.end("🍀 四叶草蓝星球 信令服务器");
+     }
+-    res.writeHead(200);
+-    res.end("🍀 四叶草蓝星球 信令服务器");
+-  }
+-});
++  });
+ 
+-const io = new Server(httpServer, {
+-  cors: { origin: "*", methods: ["GET", "POST"] },
+-});
++  const io = new Server(httpServer, {
++    cors: { origin: "*", methods: ["GET", "POST"] },
++  });
++
++  setupSocket(io);
+ 
+-setupSocket(io);
++  // 优雅退出时刷盘
++  process.on("SIGTERM", () => { flushSync(); process.exit(0); });
++  process.on("SIGINT", () => { flushSync(); process.exit(0); });
++
++  httpServer.listen(PORT, () => {
++    console.log(`🍀 四叶草蓝星球 信令服务器 v${API_VERSION} 运行在 :${PORT}`);
++    console.log(`   REST API: http://localhost:${PORT}/api/v${API_VERSION}/health`);
++  });
++}
+ 
+-httpServer.listen(PORT, () => {
+-  console.log(`🍀 四叶草蓝星球 信令服务器 v${API_VERSION} 运行在 :${PORT}`);
+-  console.log(`   REST API: http://localhost:${PORT}/api/v${API_VERSION}/health`);
++start().catch((e) => {
++  console.error("Failed to start server:", e);
++  process.exit(1);
+ });

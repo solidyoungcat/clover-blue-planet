@@ -1,0 +1,832 @@
+diff --git a/packages/server/src/db.ts b/packages/server/src/db.ts
+index d434db3..399778d 100644
+--- a/packages/server/src/db.ts
++++ b/packages/server/src/db.ts
+@@ -1,91 +1,121 @@
+ import fs from "fs";
+ import path from "path";
+ 
+ const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
+ const MESSAGES_FILE = path.join(DATA_DIR, "messages.json");
+ 
+-// Ensure data directory
+-fs.mkdirSync(DATA_DIR, { recursive: true });
+-
+ interface StoredMessage {
+   id: number;
+   room_code: string;
+   sender: string;
+   text: string;
+   type: string;
+   voice_url: string | null;
+   timestamp: number;
+ }
+ 
+ let messages: StoredMessage[] = [];
+ let nextId = 1;
+ 
+-// Load from disk
+-try {
+-  if (fs.existsSync(MESSAGES_FILE)) {
+-    const data = JSON.parse(fs.readFileSync(MESSAGES_FILE, "utf-8"));
+-    messages = data.messages || [];
+-    nextId = data.nextId || 1;
+-  }
+-} catch {
+-  // Start fresh
+-}
++// ========== 初始化（异步） ==========
+ 
+-function saveToDisk() {
++export const dbReady: Promise<void> = (async () => {
+   try {
+-    fs.writeFileSync(MESSAGES_FILE, JSON.stringify({ messages, nextId }), "utf-8");
++    await fs.promises.mkdir(DATA_DIR, { recursive: true });
++    if (fs.existsSync(MESSAGES_FILE)) {
++      const raw = await fs.promises.readFile(MESSAGES_FILE, "utf-8");
++      const data = JSON.parse(raw);
++      messages = data.messages || [];
++      nextId = data.nextId || 1;
++    }
+   } catch (e) {
+-    console.error("[db] Failed to save messages:", e);
++    console.error("[db] Failed to load messages, starting fresh:", (e as Error).message);
+   }
++})();
++
++// ========== 防抖写盘 ==========
++
++let saveTimer: NodeJS.Timeout | null = null;
++
++function scheduleSave() {
++  if (saveTimer) return; // 已有定时器，等待触发
++  saveTimer = setTimeout(async () => {
++    saveTimer = null;
++    try {
++      await fs.promises.writeFile(
++        MESSAGES_FILE,
++        JSON.stringify({ messages, nextId }),
++        "utf-8",
++      );
++    } catch (e) {
++      console.error("[db] Failed to save messages:", (e as Error).message);
++    }
++  }, 500); // 500ms 防抖窗口
+ }
+ 
++// ========== 公开 API（接口不变） ==========
++
+ export function saveMessage(msg: {
+   roomCode: string;
+   sender: "me" | "partner";
+   text: string;
+   type: string;
+   voiceUrl?: string;
+   timestamp: number;
+ }): void {
+   const stored: StoredMessage = {
+     id: nextId++,
+     room_code: msg.roomCode,
+     sender: msg.sender,
+     text: msg.text,
+     type: msg.type,
+     voice_url: msg.voiceUrl || null,
+     timestamp: msg.timestamp,
+   };
+   messages.push(stored);
+ 
+-  // Keep last 1000 per room
+-  cleanOldMessages(msg.roomCode);
+-  saveToDisk();
++  // 保持每房间最多 1000 条
++  trimRoomMessages(msg.roomCode);
++
++  // 异步防抖写盘（不阻塞事件循环）
++  scheduleSave();
+ }
+ 
+ export function getRecentMessages(roomCode: string, limit = 100): StoredMessage[] {
+   return messages
+     .filter((m) => m.room_code === roomCode)
+     .sort((a, b) => b.timestamp - a.timestamp)
+     .slice(0, limit)
+     .reverse();
+ }
+ 
+-function cleanOldMessages(roomCode: string): void {
+-  const roomMessages = messages.filter((m) => m.room_code === roomCode);
+-  if (roomMessages.length > 1000) {
+-    const toKeep = roomMessages
+-      .sort((a, b) => b.timestamp - a.timestamp)
+-      .slice(0, 1000)
+-      .map((m) => m.id);
++export function getStats(): { totalMessages: number } {
++  return { totalMessages: messages.length };
++}
++
++// ========== 内部辅助 ==========
++
++function trimRoomMessages(roomCode: string): void {
++  const roomMsgs = messages.filter((m) => m.room_code === roomCode);
++  if (roomMsgs.length > 1000) {
++    const toKeep = new Set(
++      roomMsgs
++        .sort((a, b) => b.timestamp - a.timestamp)
++        .slice(0, 1000)
++        .map((m) => m.id),
++    );
+     messages = messages.filter(
+-      (m) => m.room_code !== roomCode || toKeep.includes(m.id)
++      (m) => m.room_code !== roomCode || toKeep.has(m.id),
+     );
+   }
+ }
+ 
+-export function getStats(): { totalMessages: number } {
+-  return { totalMessages: messages.length };
++// 紧急退出时同步刷盘（供 process.on('exit') 调用）
++export function flushSync(): void {
++  if (saveTimer) clearTimeout(saveTimer);
++  try {
++    fs.writeFileSync(MESSAGES_FILE, JSON.stringify({ messages, nextId }), "utf-8");
++  } catch (e) {
++    console.error("[db] Failed to flush messages:", (e as Error).message);
++  }
+ }
+-
+-export { messages as _messages };
+diff --git a/packages/server/src/index.ts b/packages/server/src/index.ts
+index f968487..a0e21d8 100644
+--- a/packages/server/src/index.ts
++++ b/packages/server/src/index.ts
+@@ -1,15 +1,15 @@
+ import { createServer, type IncomingMessage, type ServerResponse } from "http";
+ import { Server } from "socket.io";
+ import { setupSocket } from "./socket";
+ import { roomExists, hasPassword, getUserCount, getRoomCount, getTotalUsers } from "./rooms";
+-import { getStats } from "./db";
++import { getStats, dbReady, flushSync } from "./db";
+ 
+ const PORT = process.env.PORT || 3001;
+ const API_VERSION = "1";
+ 
+ // ========== REST API 路由 ==========
+ 
+ function sendJSON(res: ServerResponse, status: number, data: unknown) {
+   res.writeHead(status, {
+     "Content-Type": "application/json",
+     "Access-Control-Allow-Origin": "*",
+@@ -79,32 +79,45 @@ function handleAPI(req: IncomingMessage, res: ServerResponse): boolean {
+       }
+     });
+     return true;
+   }
+ 
+   return false;
+ }
+ 
+ // ========== 启动 ==========
+ 
+-const httpServer = createServer((req, res) => {
+-  if (!handleAPI(req, res)) {
+-    // Health check
+-    if (req.url === "/" || req.url === "/health") {
+-      sendJSON(res, 200, { status: "ok" });
+-      return;
++async function start() {
++  await dbReady;
++  console.log("[db] Messages loaded successfully");
++
++  const httpServer = createServer((req, res) => {
++    if (!handleAPI(req, res)) {
++      if (req.url === "/" || req.url === "/health") {
++        sendJSON(res, 200, { status: "ok" });
++        return;
++      }
++      res.writeHead(200);
++      res.end("🍀 四叶草蓝星球 信令服务器");
+     }
+-    res.writeHead(200);
+-    res.end("🍀 四叶草蓝星球 信令服务器");
+-  }
+-});
++  });
+ 
+-const io = new Server(httpServer, {
+-  cors: { origin: "*", methods: ["GET", "POST"] },
+-});
++  const io = new Server(httpServer, {
++    cors: { origin: "*", methods: ["GET", "POST"] },
++  });
++
++  setupSocket(io);
+ 
+-setupSocket(io);
++  // 优雅退出时刷盘
++  process.on("SIGTERM", () => { flushSync(); process.exit(0); });
++  process.on("SIGINT", () => { flushSync(); process.exit(0); });
++
++  httpServer.listen(PORT, () => {
++    console.log(`🍀 四叶草蓝星球 信令服务器 v${API_VERSION} 运行在 :${PORT}`);
++    console.log(`   REST API: http://localhost:${PORT}/api/v${API_VERSION}/health`);
++  });
++}
+ 
+-httpServer.listen(PORT, () => {
+-  console.log(`🍀 四叶草蓝星球 信令服务器 v${API_VERSION} 运行在 :${PORT}`);
+-  console.log(`   REST API: http://localhost:${PORT}/api/v${API_VERSION}/health`);
++start().catch((e) => {
++  console.error("Failed to start server:", e);
++  process.exit(1);
+ });
+diff --git a/packages/server/src/rooms.ts b/packages/server/src/rooms.ts
+index 5ebb95e..bb5e7f3 100644
+--- a/packages/server/src/rooms.ts
++++ b/packages/server/src/rooms.ts
+@@ -40,20 +40,24 @@ export function joinRoom(
+   }
+ 
+   // 密码验证
+   if (room.passwordHash && !password) {
+     return { error: "NEED_PASSWORD" };
+   }
+   if (room.passwordHash && password && hashPassword(password, room.passwordSalt!).hash !== room.passwordHash) {
+     return { error: "密码错误" };
+   }
+ 
++  // 房间最多 2 人（双人同步观影场景）
++  if (room.users.size >= 2) {
++    return { error: "房间已满（最多 2 人）" };
++  }
+   room.users.add(socketId);
+ 
+   const userIds = Array.from(room.users);
+   const partnerId = userIds.length >= 2 ? userIds.find((id) => id !== socketId) ?? null : null;
+ 
+   return { room, partnerId };
+ }
+ 
+ export function hasPassword(code: string): boolean {
+   const room = roomMap.get(code);
+diff --git a/packages/server/src/socket.ts b/packages/server/src/socket.ts
+index b23e52c..bb7f94a 100644
+--- a/packages/server/src/socket.ts
++++ b/packages/server/src/socket.ts
+@@ -119,20 +119,24 @@ export function setupSocket(io: Server) {
+         socket.emit("error", { message: "房间码已被使用，请换一个" });
+         return;
+       }
+ 
+       const password = typeof d.password === "string" && d.password.length > 0
+         ? d.password
+         : undefined;
+ 
+       createRoom(d.code, password);
+ 
++      // 创建者自动加入房间
++      socket.join(d.code);
++      socketRoomMap.set(socket.id, d.code);
++
+       socket.emit("room:created", { code: d.code, hasPassword: !!password });
+       console.log(`[room:created] ${d.code} ${password ? "(加密)" : "(公开)"}`);
+     });
+ 
+     // --- 检查房间 ---
+     socket.on("room:check", (code: unknown) => {
+       if (typeof code !== "string" || !ROOM_CODE_RE.test(code)) {
+         socket.emit("room:check-result", { exists: false, reason: "invalid" });
+         return;
+       }
+@@ -201,37 +205,42 @@ export function setupSocket(io: Server) {
+       saveMessage({
+         roomCode: d.roomCode as string,
+         sender: msg.sender,
+         text: msg.text,
+         type: msg.type,
+         voiceUrl: msg.voiceUrl,
+         timestamp: msg.timestamp,
+       });
+ 
+       const partner = getPartnerId(d.roomCode, socket.id);
+-      if (partner) io.to(partner).emit("chat:message", d.message);
++      if (partner) {
++        // 转发时强制覆写 sender，防止客户端伪造身份
++        io.to(partner).emit("chat:message", { ...msg, sender: "partner" });
++      }
+     });
+ 
+     socket.on("sync:state", (data: unknown) => {
+       if (!data || typeof data !== "object") return;
+       const d = data as Record<string, unknown>;
+       if (!checkRateLimit(socket.id, "sync")) return;
+       if (typeof d.roomCode !== "string" || !ROOM_CODE_RE.test(d.roomCode)) return;
++      if (socketRoomMap.get(socket.id) !== d.roomCode) return;
+       if (!isValidSyncState(d.state)) return;
+       socket.to(d.roomCode).emit("sync:state", d.state);
+     });
+ 
+     socket.on("pet:update", (data: unknown) => {
+       if (!data || typeof data !== "object") return;
+       const d = data as Record<string, unknown>;
+       if (!checkRateLimit(socket.id, "pet")) return;
+       if (typeof d.roomCode !== "string" || !ROOM_CODE_RE.test(d.roomCode)) return;
++      if (socketRoomMap.get(socket.id) !== d.roomCode) return;
+       if (!isValidPetState(d.petState)) return;
+       socket.to(d.roomCode).emit("pet:update", d.petState);
+     });
+ 
+     socket.on("room:leave", (code: unknown) => {
+       if (typeof code !== "string") return;
+       leaveRoom(code, socket.id);
+       socket.leave(code);
+       socket.emit("room:left");
+       console.log(`[room:leave] ${socket.id} ← ${code}`);
+diff --git a/packages/shared/src/components/chat/MessageInput.tsx b/packages/shared/src/components/chat/MessageInput.tsx
+index d2e2d3b..f8319ac 100644
+--- a/packages/shared/src/components/chat/MessageInput.tsx
++++ b/packages/shared/src/components/chat/MessageInput.tsx
+@@ -50,21 +50,27 @@ export function MessageInput({ onSend }: MessageInputProps) {
+       <div className="flex items-center gap-1.5 px-2.5 py-2">
+         <button
+           onClick={() => setShowEmoji(!showEmoji)}
+           className={`btn-ocean btn-sm !px-2 ${showEmoji ? "border-ocean-400/50 shadow-glow-sm" : ""}`}
+         >
+           😊
+         </button>
+ 
+         <VoiceRecorder
+           onRecorded={(blob) => {
+-            onSend("[语音消息]", "voice");
++            // 将 Blob 转为 Base64 以通过 Socket.IO 传输
++            const reader = new FileReader();
++            reader.onloadend = () => {
++              const base64 = reader.result as string;
++              onSend(base64, "voice");
++            };
++            reader.readAsDataURL(blob);
+           }}
+         />
+ 
+         <div className="flex-1 relative">
+           <input
+             value={text}
+             onChange={(e) => setText(e.target.value)}
+             onKeyDown={handleKeyDown}
+             placeholder="说点什么..."
+             className="w-full bg-ocean-900/40 text-ocean-100 placeholder-ocean-600 rounded-xl px-4 py-2 text-sm outline-none border border-ocean-700/30 focus:border-ocean-500/50 focus:shadow-glow-sm transition-all"
+diff --git a/packages/shared/src/components/layout/CinemaMode.tsx b/packages/shared/src/components/layout/CinemaMode.tsx
+index 84d4812..2b319d2 100644
+--- a/packages/shared/src/components/layout/CinemaMode.tsx
++++ b/packages/shared/src/components/layout/CinemaMode.tsx
+@@ -1,23 +1,29 @@
+ import React, { useState, useEffect } from "react";
+ import { VideoPlayer } from "../player/VideoPlayer";
+ import { useChatStore, type Message } from "../../stores/chatStore";
+ import { MessageInput } from "../chat/MessageInput";
+ import { PetDisplay } from "../pet/PetDisplay";
++import type { SyncState } from "../../lib/sync";
+ 
+ interface CinemaModeProps {
+   onExit: () => void;
+   sendChatMessage: (msg: Message) => void;
+   roomCode: string;
++  sendSyncState: (state: SyncState) => void;
++  onSyncState: (handler: (state: SyncState) => void) => () => void;
+ }
+ 
+-export function CinemaMode({ onExit, sendChatMessage, roomCode }: CinemaModeProps) {
++export function CinemaMode({
++  onExit, sendChatMessage, roomCode,
++  sendSyncState, onSyncState,
++}: CinemaModeProps) {
+   const [showControls, setShowControls] = useState(true);
+   const messages = useChatStore((s) => s.messages);
+   const lastMessage = messages[messages.length - 1];
+   const addMessage = useChatStore((s) => s.addMessage);
+ 
+   useEffect(() => {
+     const timer = setTimeout(() => setShowControls(false), 3000);
+     return () => clearTimeout(timer);
+   }, [showControls]);
+ 
+@@ -40,21 +46,25 @@ export function CinemaMode({ onExit, sendChatMessage, roomCode }: CinemaModeProp
+       type,
+       timestamp: Date.now(),
+     };
+     addMessage(msg);
+     sendChatMessage(msg);
+   };
+ 
+   return (
+     <div className="fixed inset-0 bg-black z-50 flex flex-col">
+       <div className="flex-1 min-h-0">
+-        <VideoPlayer roomCode={roomCode} />
++        <VideoPlayer
++          roomCode={roomCode}
++          sendSyncState={sendSyncState}
++          onSyncState={onSyncState}
++        />
+       </div>
+       {showControls && (
+         <div className="absolute bottom-[52px] left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-4">
+           <button onClick={onExit} className="text-white/80 hover:text-white text-sm">
+             ⛶ 退出影院
+           </button>
+         </div>
+       )}
+       <div className="flex items-center gap-3 px-4 py-2" style={{ background: "rgba(8,47,73,0.7)", backdropFilter: "blur(8px)" }}>
+         <div className="flex-1 flex items-center gap-2 min-w-0">
+diff --git a/packages/shared/src/components/player/VideoPlayer.tsx b/packages/shared/src/components/player/VideoPlayer.tsx
+index 1ae709f..782f870 100644
+--- a/packages/shared/src/components/player/VideoPlayer.tsx
++++ b/packages/shared/src/components/player/VideoPlayer.tsx
+@@ -1,41 +1,55 @@
+ import React, { useRef, useEffect } from "react";
+ import { usePlayerStore } from "../../stores/playerStore";
++import type { SyncState } from "../../lib/sync";
+ import { useVideoSync } from "../../hooks/useVideoSync";
+ import { SourceSelector } from "./SourceSelector";
+ import { PlaybackControls } from "./PlaybackControls";
+ 
+ interface VideoPlayerProps {
+   onFullscreen?: () => void;
+   roomCode: string;
++  sendSyncState: (state: SyncState) => void;
++  onSyncState: (handler: (state: SyncState) => void) => () => void;
+ }
+ 
+-export function VideoPlayer({ onFullscreen, roomCode }: VideoPlayerProps) {
++export function VideoPlayer({ onFullscreen, roomCode, sendSyncState, onSyncState }: VideoPlayerProps) {
+   const videoRef = useRef<HTMLVideoElement>(null);
+   const { isPlaying, currentTime, playbackRate, volume, source, syncStatus,
+     setCurrentTime, setDuration, play, pause } = usePlayerStore();
+ 
+-  useVideoSync(roomCode);
++  useVideoSync(roomCode, sendSyncState, onSyncState);
+ 
+   useEffect(() => {
+     const v = videoRef.current; if (!v) return;
+     if (isPlaying) v.play().catch(() => {}); else v.pause();
+   }, [isPlaying]);
+ 
+   useEffect(() => {
+     const v = videoRef.current; if (!v) return;
+     if (Math.abs(v.currentTime - currentTime) > 0.5) v.currentTime = currentTime;
+   }, [currentTime]);
+ 
+   useEffect(() => { if (videoRef.current) videoRef.current.playbackRate = playbackRate; }, [playbackRate]);
+   useEffect(() => { if (videoRef.current) videoRef.current.volume = volume; }, [volume]);
+ 
++  // 同步 source 到 video 元素 src
++  useEffect(() => {
++    const v = videoRef.current;
++    if (!v || !source) return;
++    if (source.type === "file" && source.path) {
++      v.src = `file://${source.path}`;
++    } else if (source.type === "url" && source.url) {
++      v.src = source.url;
++    }
++  }, [source]);
++
+   return (
+     <div className="flex flex-col flex-1 min-h-0">
+       <SourceSelector />
+       <div className="flex-1 bg-black flex items-center justify-center min-h-0 relative">
+         {source ? (
+           <video ref={videoRef}
+             onTimeUpdate={() => { if (videoRef.current) setCurrentTime(videoRef.current.currentTime); }}
+             onLoadedMetadata={() => { if (videoRef.current) setDuration(videoRef.current.duration); }}
+             onClick={() => isPlaying ? pause() : play()}
+             className="max-w-full max-h-full object-contain" />
+diff --git a/packages/shared/src/hooks/useSocket.ts b/packages/shared/src/hooks/useSocket.ts
+index 960fe82..541e811 100644
+--- a/packages/shared/src/hooks/useSocket.ts
++++ b/packages/shared/src/hooks/useSocket.ts
+@@ -1,24 +1,26 @@
+ import { useEffect, useRef, useCallback, useState } from "react";
+ import { io, type Socket } from "socket.io-client";
+ import { useRoomStore } from "../stores/roomStore";
+ import { useChatStore, type Message } from "../stores/chatStore";
+ import { ClientEvents, ServerEvents, API_VERSION } from "../types/messages";
++import type { SyncState } from "../lib/sync";
+ 
+ const SERVER_URL =
+   (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_SERVER_URL) ||
+   "http://localhost:3001";
+ 
+ export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "disconnected";
+ 
+ export function useSocket(roomCode: string) {
+   const socketRef = useRef<Socket | null>(null);
++  const hasJoinedRef = useRef(false);
+   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
+   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+   const [needPassword, setNeedPassword] = useState(false);
+   const setPartnerOnline = useRoomStore((s) => s.setPartnerOnline);
+   const addMessage = useChatStore((s) => s.addMessage);
+ 
+   useEffect(() => {
+     const socket = io(SERVER_URL, {
+       autoConnect: false,
+       query: { v: String(API_VERSION) },
+@@ -26,20 +28,24 @@ export function useSocket(roomCode: string) {
+       reconnectionAttempts: 10,
+       reconnectionDelay: 1000,
+       reconnectionDelayMax: 10000,
+     });
+ 
+     socketRef.current = socket;
+ 
+     socket.on("connect", () => {
+       setConnectionStatus("connected");
+       setErrorMessage(null);
++      // 仅重连时（已加入过房间）自动 re-join
++      if (roomCode && hasJoinedRef.current) {
++        socket.emit(ClientEvents.ROOM_JOIN, { code: roomCode });
++      }
+     });
+ 
+     socket.io.on("reconnect_attempt", () => {
+       setConnectionStatus("reconnecting");
+     });
+ 
+     socket.on("disconnect", (reason) => {
+       if (reason === "io server disconnect") {
+         setConnectionStatus("disconnected");
+       } else {
+@@ -83,27 +89,29 @@ export function useSocket(roomCode: string) {
+ 
+     socket.connect();
+ 
+     return () => {
+       socket.disconnect();
+     };
+   }, [roomCode]);
+ 
+   const createRoom = useCallback(
+     (code: string, password?: string) => {
++      hasJoinedRef.current = true;
+       socketRef.current?.emit(ClientEvents.ROOM_CREATE, { code, password });
+     },
+     []
+   );
+ 
+   const joinRoom = useCallback((code: string, password?: string) => {
+     setNeedPassword(false);
++    hasJoinedRef.current = true;
+     socketRef.current?.emit(ClientEvents.ROOM_JOIN, { code, password });
+   }, []);
+ 
+   const checkRoom = useCallback(
+     (code: string, callback: (result: { exists: boolean; hasPassword: boolean; userCount: number }) => void) => {
+       const handler = (result: any) => {
+         callback(result);
+         socketRef.current?.off(ServerEvents.ROOM_CHECK_RESULT, handler);
+       };
+       socketRef.current?.on(ServerEvents.ROOM_CHECK_RESULT, handler);
+@@ -113,36 +121,53 @@ export function useSocket(roomCode: string) {
+   );
+ 
+   const sendChatMessage = useCallback(
+     (message: Message) => {
+       socketRef.current?.emit(ClientEvents.CHAT_MESSAGE, { roomCode, message });
+     },
+     [roomCode]
+   );
+ 
+   const sendSyncState = useCallback(
+-    (state: unknown) => {
++    (state: SyncState) => {
+       socketRef.current?.emit(ClientEvents.SYNC_STATE, { roomCode, state });
+     },
+     [roomCode]
+   );
+ 
+   const sendPetUpdate = useCallback(
+     (petState: unknown) => {
+       socketRef.current?.emit(ClientEvents.PET_UPDATE, { roomCode, petState });
+     },
+     [roomCode]
+   );
+ 
++  const onSyncState = useCallback(
++    (handler: (state: SyncState) => void): (() => void) => {
++      const wrappedHandler = (state: unknown) => {
++        if (state && typeof state === "object") {
++          handler(state as SyncState);
++        }
++      };
++      socketRef.current?.on(ServerEvents.SYNC_STATE, wrappedHandler);
++      return () => {
++        socketRef.current?.off(ServerEvents.SYNC_STATE, wrappedHandler);
++      };
++    },
++    [],
++  );
++
+   return {
+     connectionStatus,
+     isConnected: connectionStatus === "connected",
+     errorMessage,
+     needPassword,
++    socketRef,
+     createRoom,
+     joinRoom,
+     checkRoom,
+     sendChatMessage,
+     sendSyncState,
++    onSyncState,
+     sendPetUpdate,
+   };
+ }
+diff --git a/packages/shared/src/hooks/useVideoSync.ts b/packages/shared/src/hooks/useVideoSync.ts
+index c3f5612..cbada51 100644
+--- a/packages/shared/src/hooks/useVideoSync.ts
++++ b/packages/shared/src/hooks/useVideoSync.ts
+@@ -1,96 +1,81 @@
+ import { useEffect, useRef, useCallback } from "react";
+-import { io, type Socket } from "socket.io-client";
+ import { usePlayerStore } from "../stores/playerStore";
+ import type { SyncState } from "../lib/sync";
+ import { shouldApplyRemoteState } from "../lib/sync";
+ 
+-const SERVER_URL =
+-  (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_SERVER_URL) ||
+-  "http://localhost:3001";
+-
+-export function useVideoSync(roomCode: string) {
++/**
++ * 视频同步 Hook（v2 — 使用共享 Socket.IO 连接）
++ */
++export function useVideoSync(
++  roomCode: string,
++  sendSyncState: (state: SyncState) => void,
++  onSyncState: (handler: (state: SyncState) => void) => () => void,
++) {
+   const player = usePlayerStore();
+-  const socketRef = useRef<Socket | null>(null);
+   const lastSentRef = useRef(0);
+   const isRemoteUpdate = useRef(false);
+ 
+-  // Connect socket and listen for remote sync state
++  // 注册远程同步事件监听
+   useEffect(() => {
+-    const socket = io(SERVER_URL);
+-    socketRef.current = socket;
+-
+-    socket.on("connect", () => {
+-      socket.emit("room:join", roomCode);
+-    });
+-
+-    socket.on("sync:state", (state: SyncState) => {
++    const cleanup = onSyncState((state: SyncState) => {
+       isRemoteUpdate.current = true;
+ 
+       player.setSyncStatus("connected");
+ 
+       if (state.isPlaying) player.play();
+       else player.pause();
+ 
+       if (shouldApplyRemoteState(
+         { currentTime: player.currentTime },
+-        state
++        state,
+       )) {
+         player.seek(state.currentTime);
+       }
+ 
+       setTimeout(() => {
+         isRemoteUpdate.current = false;
+       }, 100);
+     });
+ 
+-    socket.connect();
+-
+-    return () => {
+-      socket.emit("room:leave", roomCode);
+-      socket.disconnect();
+-    };
+-  }, [roomCode]);
++    return cleanup;
++  }, [roomCode, onSyncState]); // eslint-disable-line react-hooks/exhaustive-deps
+ 
+-  // Send local state changes (throttled ~100ms, skip during remote updates)
++  // 发送本地状态变更（节流 200ms，跳过远程更新期间）
+   useEffect(() => {
+     const now = Date.now();
+-    if (now - lastSentRef.current < 100 || isRemoteUpdate.current) return;
++    if (now - lastSentRef.current < 200 || isRemoteUpdate.current) return;
+     lastSentRef.current = now;
+ 
+-    socketRef.current?.emit("sync:state", {
+-      roomCode,
+-      state: {
+-        isPlaying: player.isPlaying,
+-        currentTime: player.currentTime,
+-        playbackRate: player.playbackRate,
+-        timestamp: Date.now(),
+-      },
++    sendSyncState({
++      isPlaying: player.isPlaying,
++      currentTime: player.currentTime,
++      playbackRate: player.playbackRate,
++      timestamp: Date.now(),
+     });
+   }, [player.isPlaying, player.currentTime, player.playbackRate]);
+ 
+-  // Expose handleRemoteState for external wiring if needed
+   const handleRemoteState = useCallback(
+     (state: SyncState) => {
+       isRemoteUpdate.current = true;
+ 
+       player.setSyncStatus("connected");
+ 
+       if (state.isPlaying) player.play();
+       else player.pause();
+ 
+       if (shouldApplyRemoteState(
+         { currentTime: player.currentTime },
+-        state
++        state,
+       )) {
+         player.seek(state.currentTime);
+       }
+ 
+       setTimeout(() => {
+         isRemoteUpdate.current = false;
+       }, 100);
+     },
+-    [player]
++    [player],
+   );
+ 
+   return { handleRemoteState };
+ }
+diff --git a/packages/web/src/App.tsx b/packages/web/src/App.tsx
+index 5ad34d0..fac3545 100644
+--- a/packages/web/src/App.tsx
++++ b/packages/web/src/App.tsx
+@@ -1,37 +1,43 @@
+ import React, { useState } from "react";
+ import {
+   AppLayout, useRoomStore, RoomConnector, useSocket,
+   ChatPanel, VideoPlayer, PlayerToolbar, CinemaMode, ConnectionBanner,
+ } from "@clover/shared";
+ 
+ export function App() {
+   const { roomCode, partnerOnline } = useRoomStore();
+   const {
+     connectionStatus, errorMessage, sendChatMessage,
++    sendSyncState, onSyncState,
+     createRoom, joinRoom, checkRoom,
+   } = useSocket(roomCode);
+   const [cinemaMode, setCinemaMode] = useState(false);
+ 
+   if (cinemaMode) {
+-    return <CinemaMode onExit={() => setCinemaMode(false)} sendChatMessage={sendChatMessage} roomCode={roomCode} />;
++    return <CinemaMode onExit={() => setCinemaMode(false)} sendChatMessage={sendChatMessage} roomCode={roomCode} sendSyncState={sendSyncState} onSyncState={onSyncState} />;
+   }
+ 
+   return (
+     <AppLayout
+       roomCode={roomCode}
+       partnerOnline={partnerOnline}
+       playerArea={
+         <div className="flex flex-col flex-1 min-h-0">
+           <ConnectionBanner status={connectionStatus} message={errorMessage} />
+           <RoomConnector createRoom={createRoom} joinRoom={joinRoom} checkRoom={checkRoom} />
+-          <VideoPlayer roomCode={roomCode} onFullscreen={() => setCinemaMode(true)} />
++          <VideoPlayer
++            roomCode={roomCode}
++            sendSyncState={sendSyncState}
++            onSyncState={onSyncState}
++            onFullscreen={() => setCinemaMode(true)}
++          />
+           <PlayerToolbar />
+         </div>
+       }
+       chatArea={
+         <ChatPanel sendChatMessage={sendChatMessage} />
+       }
+       onCopyRoomCode={() => navigator.clipboard.writeText(roomCode)}
+       onOpenTheme={() => {}}
+       onOpenSettings={() => {}}
+     />
+diff --git a/railway.toml b/railway.toml
+index 4e650a7..8cec7d0 100644
+--- a/railway.toml
++++ b/railway.toml
+@@ -1,8 +1,11 @@
+ [build]
+ builder = "nixpacks"
+-buildCommand = "cd packages/server && npm install && npx tsc"
++buildCommand = "npm install -g pnpm@8 && pnpm install --filter server && pnpm --filter server build"
+ 
+ [deploy]
+-startCommand = "cd packages/server && node dist/index.js"
++startCommand = "node packages/server/dist/index.js"
+ healthcheckPath = "/health"
+ restartPolicyType = "always"
++
++[deploy.env]
++DATA_DIR = "/data"

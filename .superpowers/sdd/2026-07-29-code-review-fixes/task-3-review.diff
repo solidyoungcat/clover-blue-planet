@@ -1,0 +1,348 @@
+diff --git a/packages/shared/src/components/layout/CinemaMode.tsx b/packages/shared/src/components/layout/CinemaMode.tsx
+index 84d4812..2b319d2 100644
+--- a/packages/shared/src/components/layout/CinemaMode.tsx
++++ b/packages/shared/src/components/layout/CinemaMode.tsx
+@@ -1,23 +1,29 @@
+ import React, { useState, useEffect } from "react";
+ import { VideoPlayer } from "../player/VideoPlayer";
+ import { useChatStore, type Message } from "../../stores/chatStore";
+ import { MessageInput } from "../chat/MessageInput";
+ import { PetDisplay } from "../pet/PetDisplay";
++import type { SyncState } from "../../lib/sync";
+ 
+ interface CinemaModeProps {
+   onExit: () => void;
+   sendChatMessage: (msg: Message) => void;
+   roomCode: string;
++  sendSyncState: (state: SyncState) => void;
++  onSyncState: (handler: (state: SyncState) => void) => () => void;
+ }
+ 
+-export function CinemaMode({ onExit, sendChatMessage, roomCode }: CinemaModeProps) {
++export function CinemaMode({
++  onExit, sendChatMessage, roomCode,
++  sendSyncState, onSyncState,
++}: CinemaModeProps) {
+   const [showControls, setShowControls] = useState(true);
+   const messages = useChatStore((s) => s.messages);
+   const lastMessage = messages[messages.length - 1];
+   const addMessage = useChatStore((s) => s.addMessage);
+ 
+   useEffect(() => {
+     const timer = setTimeout(() => setShowControls(false), 3000);
+     return () => clearTimeout(timer);
+   }, [showControls]);
+ 
+@@ -40,21 +46,25 @@ export function CinemaMode({ onExit, sendChatMessage, roomCode }: CinemaModeProp
+       type,
+       timestamp: Date.now(),
+     };
+     addMessage(msg);
+     sendChatMessage(msg);
+   };
+ 
+   return (
+     <div className="fixed inset-0 bg-black z-50 flex flex-col">
+       <div className="flex-1 min-h-0">
+-        <VideoPlayer roomCode={roomCode} />
++        <VideoPlayer
++          roomCode={roomCode}
++          sendSyncState={sendSyncState}
++          onSyncState={onSyncState}
++        />
+       </div>
+       {showControls && (
+         <div className="absolute bottom-[52px] left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-4">
+           <button onClick={onExit} className="text-white/80 hover:text-white text-sm">
+             ⛶ 退出影院
+           </button>
+         </div>
+       )}
+       <div className="flex items-center gap-3 px-4 py-2" style={{ background: "rgba(8,47,73,0.7)", backdropFilter: "blur(8px)" }}>
+         <div className="flex-1 flex items-center gap-2 min-w-0">
+diff --git a/packages/shared/src/components/player/VideoPlayer.tsx b/packages/shared/src/components/player/VideoPlayer.tsx
+index 1ae709f..595b863 100644
+--- a/packages/shared/src/components/player/VideoPlayer.tsx
++++ b/packages/shared/src/components/player/VideoPlayer.tsx
+@@ -1,27 +1,30 @@
+ import React, { useRef, useEffect } from "react";
+ import { usePlayerStore } from "../../stores/playerStore";
++import type { SyncState } from "../../lib/sync";
+ import { useVideoSync } from "../../hooks/useVideoSync";
+ import { SourceSelector } from "./SourceSelector";
+ import { PlaybackControls } from "./PlaybackControls";
+ 
+ interface VideoPlayerProps {
+   onFullscreen?: () => void;
+   roomCode: string;
++  sendSyncState: (state: SyncState) => void;
++  onSyncState: (handler: (state: SyncState) => void) => () => void;
+ }
+ 
+-export function VideoPlayer({ onFullscreen, roomCode }: VideoPlayerProps) {
++export function VideoPlayer({ onFullscreen, roomCode, sendSyncState, onSyncState }: VideoPlayerProps) {
+   const videoRef = useRef<HTMLVideoElement>(null);
+   const { isPlaying, currentTime, playbackRate, volume, source, syncStatus,
+     setCurrentTime, setDuration, play, pause } = usePlayerStore();
+ 
+-  useVideoSync(roomCode);
++  useVideoSync(roomCode, sendSyncState, onSyncState);
+ 
+   useEffect(() => {
+     const v = videoRef.current; if (!v) return;
+     if (isPlaying) v.play().catch(() => {}); else v.pause();
+   }, [isPlaying]);
+ 
+   useEffect(() => {
+     const v = videoRef.current; if (!v) return;
+     if (Math.abs(v.currentTime - currentTime) > 0.5) v.currentTime = currentTime;
+   }, [currentTime]);
+diff --git a/packages/shared/src/hooks/useSocket.ts b/packages/shared/src/hooks/useSocket.ts
+index 960fe82..619a7bb 100644
+--- a/packages/shared/src/hooks/useSocket.ts
++++ b/packages/shared/src/hooks/useSocket.ts
+@@ -1,15 +1,16 @@
+ import { useEffect, useRef, useCallback, useState } from "react";
+ import { io, type Socket } from "socket.io-client";
+ import { useRoomStore } from "../stores/roomStore";
+ import { useChatStore, type Message } from "../stores/chatStore";
+ import { ClientEvents, ServerEvents, API_VERSION } from "../types/messages";
++import type { SyncState } from "../lib/sync";
+ 
+ const SERVER_URL =
+   (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_SERVER_URL) ||
+   "http://localhost:3001";
+ 
+ export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "disconnected";
+ 
+ export function useSocket(roomCode: string) {
+   const socketRef = useRef<Socket | null>(null);
+   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
+@@ -113,36 +114,53 @@ export function useSocket(roomCode: string) {
+   );
+ 
+   const sendChatMessage = useCallback(
+     (message: Message) => {
+       socketRef.current?.emit(ClientEvents.CHAT_MESSAGE, { roomCode, message });
+     },
+     [roomCode]
+   );
+ 
+   const sendSyncState = useCallback(
+-    (state: unknown) => {
++    (state: SyncState) => {
+       socketRef.current?.emit(ClientEvents.SYNC_STATE, { roomCode, state });
+     },
+     [roomCode]
+   );
+ 
+   const sendPetUpdate = useCallback(
+     (petState: unknown) => {
+       socketRef.current?.emit(ClientEvents.PET_UPDATE, { roomCode, petState });
+     },
+     [roomCode]
+   );
+ 
++  const onSyncState = useCallback(
++    (handler: (state: SyncState) => void): (() => void) => {
++      const wrappedHandler = (state: unknown) => {
++        if (state && typeof state === "object") {
++          handler(state as SyncState);
++        }
++      };
++      socketRef.current?.on(ServerEvents.SYNC_STATE, wrappedHandler);
++      return () => {
++        socketRef.current?.off(ServerEvents.SYNC_STATE, wrappedHandler);
++      };
++    },
++    [],
++  );
++
+   return {
+     connectionStatus,
+     isConnected: connectionStatus === "connected",
+     errorMessage,
+     needPassword,
++    socketRef,
+     createRoom,
+     joinRoom,
+     checkRoom,
+     sendChatMessage,
+     sendSyncState,
++    onSyncState,
+     sendPetUpdate,
+   };
+ }
+diff --git a/packages/shared/src/hooks/useVideoSync.ts b/packages/shared/src/hooks/useVideoSync.ts
+index c3f5612..cbada51 100644
+--- a/packages/shared/src/hooks/useVideoSync.ts
++++ b/packages/shared/src/hooks/useVideoSync.ts
+@@ -1,96 +1,81 @@
+ import { useEffect, useRef, useCallback } from "react";
+-import { io, type Socket } from "socket.io-client";
+ import { usePlayerStore } from "../stores/playerStore";
+ import type { SyncState } from "../lib/sync";
+ import { shouldApplyRemoteState } from "../lib/sync";
+ 
+-const SERVER_URL =
+-  (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_SERVER_URL) ||
+-  "http://localhost:3001";
+-
+-export function useVideoSync(roomCode: string) {
++/**
++ * 视频同步 Hook（v2 — 使用共享 Socket.IO 连接）
++ */
++export function useVideoSync(
++  roomCode: string,
++  sendSyncState: (state: SyncState) => void,
++  onSyncState: (handler: (state: SyncState) => void) => () => void,
++) {
+   const player = usePlayerStore();
+-  const socketRef = useRef<Socket | null>(null);
+   const lastSentRef = useRef(0);
+   const isRemoteUpdate = useRef(false);
+ 
+-  // Connect socket and listen for remote sync state
++  // 注册远程同步事件监听
+   useEffect(() => {
+-    const socket = io(SERVER_URL);
+-    socketRef.current = socket;
+-
+-    socket.on("connect", () => {
+-      socket.emit("room:join", roomCode);
+-    });
+-
+-    socket.on("sync:state", (state: SyncState) => {
++    const cleanup = onSyncState((state: SyncState) => {
+       isRemoteUpdate.current = true;
+ 
+       player.setSyncStatus("connected");
+ 
+       if (state.isPlaying) player.play();
+       else player.pause();
+ 
+       if (shouldApplyRemoteState(
+         { currentTime: player.currentTime },
+-        state
++        state,
+       )) {
+         player.seek(state.currentTime);
+       }
+ 
+       setTimeout(() => {
+         isRemoteUpdate.current = false;
+       }, 100);
+     });
+ 
+-    socket.connect();
+-
+-    return () => {
+-      socket.emit("room:leave", roomCode);
+-      socket.disconnect();
+-    };
+-  }, [roomCode]);
++    return cleanup;
++  }, [roomCode, onSyncState]); // eslint-disable-line react-hooks/exhaustive-deps
+ 
+-  // Send local state changes (throttled ~100ms, skip during remote updates)
++  // 发送本地状态变更（节流 200ms，跳过远程更新期间）
+   useEffect(() => {
+     const now = Date.now();
+-    if (now - lastSentRef.current < 100 || isRemoteUpdate.current) return;
++    if (now - lastSentRef.current < 200 || isRemoteUpdate.current) return;
+     lastSentRef.current = now;
+ 
+-    socketRef.current?.emit("sync:state", {
+-      roomCode,
+-      state: {
+-        isPlaying: player.isPlaying,
+-        currentTime: player.currentTime,
+-        playbackRate: player.playbackRate,
+-        timestamp: Date.now(),
+-      },
++    sendSyncState({
++      isPlaying: player.isPlaying,
++      currentTime: player.currentTime,
++      playbackRate: player.playbackRate,
++      timestamp: Date.now(),
+     });
+   }, [player.isPlaying, player.currentTime, player.playbackRate]);
+ 
+-  // Expose handleRemoteState for external wiring if needed
+   const handleRemoteState = useCallback(
+     (state: SyncState) => {
+       isRemoteUpdate.current = true;
+ 
+       player.setSyncStatus("connected");
+ 
+       if (state.isPlaying) player.play();
+       else player.pause();
+ 
+       if (shouldApplyRemoteState(
+         { currentTime: player.currentTime },
+-        state
++        state,
+       )) {
+         player.seek(state.currentTime);
+       }
+ 
+       setTimeout(() => {
+         isRemoteUpdate.current = false;
+       }, 100);
+     },
+-    [player]
++    [player],
+   );
+ 
+   return { handleRemoteState };
+ }
+diff --git a/packages/web/src/App.tsx b/packages/web/src/App.tsx
+index 5ad34d0..fac3545 100644
+--- a/packages/web/src/App.tsx
++++ b/packages/web/src/App.tsx
+@@ -1,37 +1,43 @@
+ import React, { useState } from "react";
+ import {
+   AppLayout, useRoomStore, RoomConnector, useSocket,
+   ChatPanel, VideoPlayer, PlayerToolbar, CinemaMode, ConnectionBanner,
+ } from "@clover/shared";
+ 
+ export function App() {
+   const { roomCode, partnerOnline } = useRoomStore();
+   const {
+     connectionStatus, errorMessage, sendChatMessage,
++    sendSyncState, onSyncState,
+     createRoom, joinRoom, checkRoom,
+   } = useSocket(roomCode);
+   const [cinemaMode, setCinemaMode] = useState(false);
+ 
+   if (cinemaMode) {
+-    return <CinemaMode onExit={() => setCinemaMode(false)} sendChatMessage={sendChatMessage} roomCode={roomCode} />;
++    return <CinemaMode onExit={() => setCinemaMode(false)} sendChatMessage={sendChatMessage} roomCode={roomCode} sendSyncState={sendSyncState} onSyncState={onSyncState} />;
+   }
+ 
+   return (
+     <AppLayout
+       roomCode={roomCode}
+       partnerOnline={partnerOnline}
+       playerArea={
+         <div className="flex flex-col flex-1 min-h-0">
+           <ConnectionBanner status={connectionStatus} message={errorMessage} />
+           <RoomConnector createRoom={createRoom} joinRoom={joinRoom} checkRoom={checkRoom} />
+-          <VideoPlayer roomCode={roomCode} onFullscreen={() => setCinemaMode(true)} />
++          <VideoPlayer
++            roomCode={roomCode}
++            sendSyncState={sendSyncState}
++            onSyncState={onSyncState}
++            onFullscreen={() => setCinemaMode(true)}
++          />
+           <PlayerToolbar />
+         </div>
+       }
+       chatArea={
+         <ChatPanel sendChatMessage={sendChatMessage} />
+       }
+       onCopyRoomCode={() => navigator.clipboard.writeText(roomCode)}
+       onOpenTheme={() => {}}
+       onOpenSettings={() => {}}
+     />
