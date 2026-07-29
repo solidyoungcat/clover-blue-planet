@@ -4,5 +4,5 @@ buildCommand = "cd packages/server && npm install && npx tsc"
 
 [deploy]
 startCommand = "cd packages/server && node dist/index.js"
-healthcheckPath = "/api/v1/health"
+healthcheckPath = "/health"
 restartPolicyType = "always"
