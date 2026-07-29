@@ -49,7 +49,7 @@ jobs:
       - run: pnpm install --ignore-scripts
         env:
           npm_config_msvs_version: "2022"
-      - run: node node_modules/electron/install.js
+      - run: pnpm rebuild electron
 
       - uses: actions/download-artifact@v4
         with:
@@ -83,7 +83,7 @@ jobs:
           cache: 'pnpm'
 
       - run: pnpm install --ignore-scripts
-      - run: node node_modules/electron/install.js
+      - run: pnpm rebuild electron
 
       - uses: actions/download-artifact@v4
         with:
