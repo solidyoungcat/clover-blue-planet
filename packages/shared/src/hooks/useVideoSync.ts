@@ -1,29 +1,23 @@
 import { useEffect, useRef, useCallback } from "react";
-import { io, type Socket } from "socket.io-client";
 import { usePlayerStore } from "../stores/playerStore";
 import type { SyncState } from "../lib/sync";
 import { shouldApplyRemoteState } from "../lib/sync";
 
-const SERVER_URL =
-  (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_SERVER_URL) ||
-  "http://localhost:3001";
-
-export function useVideoSync(roomCode: string) {
+/**
+ * 视频同步 Hook（v2 — 使用共享 Socket.IO 连接）
+ */
+export function useVideoSync(
+  roomCode: string,
+  sendSyncState: (state: SyncState) => void,
+  onSyncState: (handler: (state: SyncState) => void) => () => void,
+) {
   const player = usePlayerStore();
-  const socketRef = useRef<Socket | null>(null);
   const lastSentRef = useRef(0);
   const isRemoteUpdate = useRef(false);
 
-  // Connect socket and listen for remote sync state
+  // 注册远程同步事件监听
   useEffect(() => {
-    const socket = io(SERVER_URL);
-    socketRef.current = socket;
-
-    socket.on("connect", () => {
-      socket.emit("room:join", roomCode);
-    });
-
-    socket.on("sync:state", (state: SyncState) => {
+    const cleanup = onSyncState((state: SyncState) => {
       isRemoteUpdate.current = true;
 
       player.setSyncStatus("connected");
@@ -33,7 +27,7 @@ export function useVideoSync(roomCode: string) {
 
       if (shouldApplyRemoteState(
         { currentTime: player.currentTime },
-        state
+        state,
       )) {
         player.seek(state.currentTime);
       }
@@ -43,32 +37,23 @@ export function useVideoSync(roomCode: string) {
       }, 100);
     });
 
-    socket.connect();
+    return cleanup;
+  }, [roomCode, onSyncState]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    return () => {
-      socket.emit("room:leave", roomCode);
-      socket.disconnect();
-    };
-  }, [roomCode]);
-
-  // Send local state changes (throttled ~100ms, skip during remote updates)
+  // 发送本地状态变更（节流 200ms，跳过远程更新期间）
   useEffect(() => {
     const now = Date.now();
-    if (now - lastSentRef.current < 100 || isRemoteUpdate.current) return;
+    if (now - lastSentRef.current < 200 || isRemoteUpdate.current) return;
     lastSentRef.current = now;
 
-    socketRef.current?.emit("sync:state", {
-      roomCode,
-      state: {
-        isPlaying: player.isPlaying,
-        currentTime: player.currentTime,
-        playbackRate: player.playbackRate,
-        timestamp: Date.now(),
-      },
+    sendSyncState({
+      isPlaying: player.isPlaying,
+      currentTime: player.currentTime,
+      playbackRate: player.playbackRate,
+      timestamp: Date.now(),
     });
   }, [player.isPlaying, player.currentTime, player.playbackRate]);
 
-  // Expose handleRemoteState for external wiring if needed
   const handleRemoteState = useCallback(
     (state: SyncState) => {
       isRemoteUpdate.current = true;
@@ -80,7 +65,7 @@ export function useVideoSync(roomCode: string) {
 
       if (shouldApplyRemoteState(
         { currentTime: player.currentTime },
-        state
+        state,
       )) {
         player.seek(state.currentTime);
       }
@@ -89,7 +74,7 @@ export function useVideoSync(roomCode: string) {
         isRemoteUpdate.current = false;
       }, 100);
     },
-    [player]
+    [player],
   );
 
   return { handleRemoteState };

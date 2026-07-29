@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from "react";
 import { usePlayerStore } from "../../stores/playerStore";
+import type { SyncState } from "../../lib/sync";
 import { useVideoSync } from "../../hooks/useVideoSync";
 import { SourceSelector } from "./SourceSelector";
 import { PlaybackControls } from "./PlaybackControls";
@@ -7,14 +8,16 @@ import { PlaybackControls } from "./PlaybackControls";
 interface VideoPlayerProps {
   onFullscreen?: () => void;
   roomCode: string;
+  sendSyncState: (state: SyncState) => void;
+  onSyncState: (handler: (state: SyncState) => void) => () => void;
 }
 
-export function VideoPlayer({ onFullscreen, roomCode }: VideoPlayerProps) {
+export function VideoPlayer({ onFullscreen, roomCode, sendSyncState, onSyncState }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const { isPlaying, currentTime, playbackRate, volume, source, syncStatus,
     setCurrentTime, setDuration, play, pause } = usePlayerStore();
 
-  useVideoSync(roomCode);
+  useVideoSync(roomCode, sendSyncState, onSyncState);
 
   useEffect(() => {
     const v = videoRef.current; if (!v) return;

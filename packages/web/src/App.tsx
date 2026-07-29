@@ -8,12 +8,13 @@ export function App() {
   const { roomCode, partnerOnline } = useRoomStore();
   const {
     connectionStatus, errorMessage, sendChatMessage,
+    sendSyncState, onSyncState,
     createRoom, joinRoom, checkRoom,
   } = useSocket(roomCode);
   const [cinemaMode, setCinemaMode] = useState(false);
 
   if (cinemaMode) {
-    return <CinemaMode onExit={() => setCinemaMode(false)} sendChatMessage={sendChatMessage} roomCode={roomCode} />;
+    return <CinemaMode onExit={() => setCinemaMode(false)} sendChatMessage={sendChatMessage} roomCode={roomCode} sendSyncState={sendSyncState} onSyncState={onSyncState} />;
   }
 
   return (
@@ -24,7 +25,12 @@ export function App() {
         <div className="flex flex-col flex-1 min-h-0">
           <ConnectionBanner status={connectionStatus} message={errorMessage} />
           <RoomConnector createRoom={createRoom} joinRoom={joinRoom} checkRoom={checkRoom} />
-          <VideoPlayer roomCode={roomCode} onFullscreen={() => setCinemaMode(true)} />
+          <VideoPlayer
+            roomCode={roomCode}
+            sendSyncState={sendSyncState}
+            onSyncState={onSyncState}
+            onFullscreen={() => setCinemaMode(true)}
+          />
           <PlayerToolbar />
         </div>
       }

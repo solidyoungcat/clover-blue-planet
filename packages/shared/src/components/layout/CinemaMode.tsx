@@ -3,14 +3,20 @@ import { VideoPlayer } from "../player/VideoPlayer";
 import { useChatStore, type Message } from "../../stores/chatStore";
 import { MessageInput } from "../chat/MessageInput";
 import { PetDisplay } from "../pet/PetDisplay";
+import type { SyncState } from "../../lib/sync";
 
 interface CinemaModeProps {
   onExit: () => void;
   sendChatMessage: (msg: Message) => void;
   roomCode: string;
+  sendSyncState: (state: SyncState) => void;
+  onSyncState: (handler: (state: SyncState) => void) => () => void;
 }
 
-export function CinemaMode({ onExit, sendChatMessage, roomCode }: CinemaModeProps) {
+export function CinemaMode({
+  onExit, sendChatMessage, roomCode,
+  sendSyncState, onSyncState,
+}: CinemaModeProps) {
   const [showControls, setShowControls] = useState(true);
   const messages = useChatStore((s) => s.messages);
   const lastMessage = messages[messages.length - 1];
@@ -47,7 +53,11 @@ export function CinemaMode({ onExit, sendChatMessage, roomCode }: CinemaModeProp
   return (
     <div className="fixed inset-0 bg-black z-50 flex flex-col">
       <div className="flex-1 min-h-0">
-        <VideoPlayer roomCode={roomCode} />
+        <VideoPlayer
+          roomCode={roomCode}
+          sendSyncState={sendSyncState}
+          onSyncState={onSyncState}
+        />
       </div>
       {showControls && (
         <div className="absolute bottom-[52px] left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-4">

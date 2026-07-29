@@ -3,6 +3,7 @@ import { io, type Socket } from "socket.io-client";
 import { useRoomStore } from "../stores/roomStore";
 import { useChatStore, type Message } from "../stores/chatStore";
 import { ClientEvents, ServerEvents, API_VERSION } from "../types/messages";
+import type { SyncState } from "../lib/sync";
 
 const SERVER_URL =
   (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_SERVER_URL) ||
@@ -120,7 +121,7 @@ export function useSocket(roomCode: string) {
   );
 
   const sendSyncState = useCallback(
-    (state: unknown) => {
+    (state: SyncState) => {
       socketRef.current?.emit(ClientEvents.SYNC_STATE, { roomCode, state });
     },
     [roomCode]
@@ -133,16 +134,33 @@ export function useSocket(roomCode: string) {
     [roomCode]
   );
 
+  const onSyncState = useCallback(
+    (handler: (state: SyncState) => void): (() => void) => {
+      const wrappedHandler = (state: unknown) => {
+        if (state && typeof state === "object") {
+          handler(state as SyncState);
+        }
+      };
+      socketRef.current?.on(ServerEvents.SYNC_STATE, wrappedHandler);
+      return () => {
+        socketRef.current?.off(ServerEvents.SYNC_STATE, wrappedHandler);
+      };
+    },
+    [],
+  );
+
   return {
     connectionStatus,
     isConnected: connectionStatus === "connected",
     errorMessage,
     needPassword,
+    socketRef,
     createRoom,
     joinRoom,
     checkRoom,
     sendChatMessage,
     sendSyncState,
+    onSyncState,
     sendPetUpdate,
   };
 }
