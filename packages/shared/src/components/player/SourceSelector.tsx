@@ -1,6 +1,34 @@
 import React, { useRef, useState } from "react";
 import { usePlayerStore } from "../../stores/playerStore";
 
+// 直接将 B站/YouTube 链接转为内嵌链接
+function toEmbedUrl(raw: string): string {
+  const url = raw.trim();
+
+  // B站 → 通过服务器代理，去除防盗链
+  const bvMatch = url.match(/bilibili\.com\/video\/(BV[a-zA-Z0-9]+)/);
+  if (bvMatch) {
+    const SERVER = (typeof window !== "undefined" && (window as any).__SERVER_URL__) ||
+                   "https://server-production-3db9.up.railway.app";
+    return `${SERVER}/api/v1/proxy?url=${encodeURIComponent(
+      `https://www.bilibili.com/video/${bvMatch[1]}/`
+    )}`;
+  }
+
+  // YouTube: youtube.com/watch?v=xxx → youtube.com/embed/xxx
+  const ytMatch = url.match(/youtube\.com\/watch\?v=([a-zA-Z0-9_-]+)/);
+  if (ytMatch) {
+    return `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=1`;
+  }
+  const ytShort = url.match(/youtu\.be\/([a-zA-Z0-9_-]+)/);
+  if (ytShort) {
+    return `https://www.youtube.com/embed/${ytShort[1]}?autoplay=1`;
+  }
+
+  // 其他 → 原样返回
+  return url;
+}
+
 export function SourceSelector() {
   const setSource = usePlayerStore((s) => s.setSource);
   const source = usePlayerStore((s) => s.source);
@@ -20,7 +48,8 @@ export function SourceSelector() {
 
   const handleUrl = () => {
     if (!urlInput.trim()) return;
-    setSource({ type: "url", url: urlInput.trim() });
+    const embedUrl = toEmbedUrl(urlInput);
+    setSource({ type: "url", url: embedUrl });
     setShowUrlInput(false);
     setUrlInput("");
   };

@@ -1,10 +1,19 @@
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect } from "react";
 import { usePlayerStore } from "../../stores/playerStore";
 import type { SyncState } from "../../lib/sync";
 import { useVideoSync } from "../../hooks/useVideoSync";
 import { SourceSelector } from "./SourceSelector";
 import { PlaybackControls } from "./PlaybackControls";
-import { resolveEmbedUrl, isVideoUrl } from "../../lib/embedResolver";
+
+// 判断是否为内嵌播放器链接（非视频直链）
+function isEmbedUrl(url: string): boolean {
+  return url.includes("player.bilibili.com") ||
+         url.includes("youtube.com/embed") ||
+         url.includes("player.bilibili.com"); // B站 embed
+}
+
+const VIDEO_EXTS = /\.(mp4|webm|mkv|avi|mov|flv|wmv)($|\?)/i;
+function isVideoUrl(url: string): boolean { return VIDEO_EXTS.test(url); }
 
 interface VideoPlayerProps {
   onFullscreen?: () => void;
@@ -15,24 +24,11 @@ interface VideoPlayerProps {
 
 export function VideoPlayer({ onFullscreen, roomCode, sendSyncState, onSyncState }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
   const { isPlaying, currentTime, playbackRate, volume, source, syncStatus,
     setCurrentTime, setDuration, play, pause } = usePlayerStore();
-  const [embedUrl, setEmbedUrl] = useState<string | null>(null);
 
   useVideoSync(roomCode, sendSyncState, onSyncState);
 
-  // 解析 source.url → 判断是否用 iframe
-  useEffect(() => {
-    if (source?.type === "url" && source.url && !isVideoUrl(source.url)) {
-      const resolved = resolveEmbedUrl(source.url);
-      setEmbedUrl(resolved);
-    } else {
-      setEmbedUrl(null);
-    }
-  }, [source]);
-
-  // ---- <video> 控制 ----
   useEffect(() => {
     const v = videoRef.current; if (!v) return;
     if (isPlaying) v.play().catch(() => {}); else v.pause();
@@ -51,14 +47,13 @@ export function VideoPlayer({ onFullscreen, roomCode, sendSyncState, onSyncState
     if (!v || !source) return;
     if (source.type === "file" && source.path) {
       v.src = `file://${source.path}`;
-    } else if (source.type === "url" && source.url) {
+    } else if (source.type === "url" && source.url && isVideoUrl(source.url)) {
       v.src = source.url;
     }
   }, [source]);
 
-  const showIframe = !!(embedUrl && source);
-  const showVideo = !!source && !showIframe;
-  const isElectron = typeof window !== "undefined" && "electronAPI" in window;
+  const urlSource = source?.type === "url" ? source.url : undefined;
+  const showIframe = !!(urlSource && (isEmbedUrl(urlSource) || !isVideoUrl(urlSource)));
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -75,14 +70,14 @@ export function VideoPlayer({ onFullscreen, roomCode, sendSyncState, onSyncState
         )}
         {showIframe && (
           <iframe
-            ref={iframeRef}
-            src={embedUrl!}
+            src={urlSource}
             allow="autoplay; fullscreen"
             allowFullScreen
+            referrerPolicy="no-referrer"
             className="w-full h-full border-0"
           />
         )}
-        {showVideo && (
+        {source && !showIframe && (
           <video ref={videoRef}
             onTimeUpdate={() => { if (videoRef.current) setCurrentTime(videoRef.current.currentTime); }}
             onLoadedMetadata={() => { if (videoRef.current) setDuration(videoRef.current.duration); }}

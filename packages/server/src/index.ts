@@ -1,4 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
+import https from "https";
+import http from "http";
 import { Server } from "socket.io";
 import { setupSocket } from "./socket";
 import { roomExists, hasPassword, getUserCount, getRoomCount, getTotalUsers } from "./rooms";
@@ -77,6 +79,31 @@ function handleAPI(req: IncomingMessage, res: ServerResponse): boolean {
       } catch {
         sendJSON(res, 400, { error: "无效的 JSON" });
       }
+    });
+    return true;
+  }
+
+  // GET /api/v1/proxy?url=... (iframe 代理，去除防盗链头)
+  if (req.method === "GET" && url.pathname === `/api/v${API_VERSION}/proxy`) {
+    const targetUrl = url.searchParams.get("url");
+    if (!targetUrl) {
+      sendJSON(res, 400, { error: "缺少 url 参数" });
+      return true;
+    }
+
+    const client = targetUrl.startsWith("https") ? https : http;
+    client.get(targetUrl, { headers: { "User-Agent": "Mozilla/5.0" } }, (proxyRes) => {
+      // 去除阻止 iframe 的头
+      const headers = { ...proxyRes.headers };
+      delete headers["x-frame-options"];
+      delete headers["content-security-policy"];
+      delete headers["content-security-policy-report-only"];
+      headers["access-control-allow-origin"] = "*";
+
+      res.writeHead(proxyRes.statusCode || 200, headers);
+      proxyRes.pipe(res);
+    }).on("error", () => {
+      sendJSON(res, 502, { error: "代理请求失败" });
     });
     return true;
   }
