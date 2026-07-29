@@ -116,6 +116,10 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       sendJSON(res, 400, { error: "缺少 url 参数" });
       return true;
     }
+    if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
+      sendJSON(res, 400, { error: "无效的 URL" });
+      return true;
+    }
 
     const client = targetUrl.startsWith("https") ? https : http;
     const reqHeaders: Record<string, string> = {

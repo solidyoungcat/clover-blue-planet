@@ -50,19 +50,25 @@ export function SourceSelector() {
   };
 
   const handleUrl = async () => {
-    if (!urlInput.trim()) return;
+    let raw = urlInput.trim();
+    if (!raw) return;
+
+    // 提取纯 URL（用户可能粘贴了 "【标题】 https://url" 格式的分享文本）
+    const urlMatch = raw.match(/https?:\/\/\S+/);
+    if (urlMatch) raw = urlMatch[0];
+
     setResolving(true);
 
     // Electron 桌面端 — 优先用 preload 直接路径（绕过 Vite 热更新缓存）
     if (isElectron) {
       const api = (window as any).electronAPI;
       if (api?.resolveAndPlay) {
-        const result = await api.resolveAndPlay(urlInput.trim());
+        const result = await api.resolveAndPlay(raw);
         setResolving(false);
         if (result?.success) {
           setSource({ type: "url", url: result.url });
         } else {
-          setSource({ type: "url", url: urlInput.trim() });
+          setSource({ type: "url", url: raw });
         }
         setShowUrlInput(false);
         setUrlInput("");
@@ -71,12 +77,12 @@ export function SourceSelector() {
     }
 
     // Web 端 / Electron 兜底 — 通过 resolveUrl
-    const streamUrl = await resolveUrl(urlInput);
+    const streamUrl = await resolveUrl(raw);
     setResolving(false);
     if (streamUrl) {
       setSource({ type: "url", url: streamUrl });
     } else {
-      setSource({ type: "url", url: urlInput.trim() });
+      setSource({ type: "url", url: raw });
     }
     setShowUrlInput(false);
     setUrlInput("");
