@@ -12,8 +12,6 @@ interface VideoPlayerProps {
   onSyncState: (handler: (state: SyncState) => void) => () => void;
 }
 
-const SERVER = (typeof import.meta !== "undefined") ? ((import.meta as any).env?.VITE_SERVER_URL || "http://localhost:3001") : "";
-
 export function VideoPlayer({ onFullscreen, roomCode, sendSyncState, onSyncState }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const proxyRetryRef = useRef(false);
@@ -53,7 +51,7 @@ export function VideoPlayer({ onFullscreen, roomCode, sendSyncState, onSyncState
     const v = videoRef.current;
     if (!v || !source || source.type !== "url" || proxyRetryRef.current) return;
     proxyRetryRef.current = true;
-    const proxyUrl = `${SERVER}/api/v1/stream?url=${encodeURIComponent(source.url!)}`;
+    const proxyUrl = `/api/v1/stream?url=${encodeURIComponent(source.url!)}`;
     v.src = proxyUrl;
     v.load();
     v.play().catch(() => {});

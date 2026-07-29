@@ -4,7 +4,6 @@ import { usePlayerStore } from "../../stores/playerStore";
 const VIDEO_EXTS = /\.(mp4|webm|mkv|avi|mov|flv|wmv)($|\?)/i;
 const isVideoUrl = (url: string) => VIDEO_EXTS.test(url);
 const isElectron = typeof window !== "undefined" && "electronAPI" in window;
-const SERVER = (!isElectron && typeof import.meta !== "undefined") ? ((import.meta as any).env?.VITE_SERVER_URL || "http://localhost:3001") : "";
 
 async function resolveUrl(raw: string): Promise<string | null> {
   const url = raw.trim();
@@ -23,7 +22,7 @@ async function resolveUrl(raw: string): Promise<string | null> {
 
   // Web 端 — HTTP API
   try {
-    const res = await fetch(`${SERVER}/api/v1/resolve?url=${encodeURIComponent(url)}`);
+    const res = await fetch(`/api/v1/resolve?url=${encodeURIComponent(url)}`);
     if (!res.ok) return null;
     const data = await res.json();
     return data.url || null;
