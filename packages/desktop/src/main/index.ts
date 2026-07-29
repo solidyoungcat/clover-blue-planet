@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, shell } from "electron";
 import path from "path";
 
 let mainWindow: BrowserWindow | null = null;
@@ -18,11 +18,7 @@ function createWindow() {
     },
   });
 
-  if (process.env.NODE_ENV === "development") {
-    mainWindow.loadURL("http://localhost:3000");
-  } else {
-    mainWindow.loadFile(path.join(__dirname, "../../web/dist/index.html"));
-  }
+  mainWindow.loadURL("http://localhost:3000");
 }
 
 ipcMain.handle("dialog:openFile", async () => {
@@ -31,6 +27,10 @@ ipcMain.handle("dialog:openFile", async () => {
     filters: [{ name: "视频文件", extensions: ["mp4", "mkv", "avi", "webm", "mov"] }],
   });
   return result.canceled ? null : result.filePaths[0];
+});
+
+ipcMain.handle("shell:openExternal", async (_event, url: string) => {
+  await shell.openExternal(url);
 });
 
 app.whenReady().then(createWindow);

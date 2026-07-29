@@ -21,11 +21,6 @@ export function SourceSelector() {
   const handleUrl = () => {
     if (!urlInput.trim()) return;
     setSource({ type: "url", url: urlInput.trim() });
-    const video = document.querySelector("video");
-    if (video) {
-      video.src = urlInput.trim();
-      video.load();
-    }
     setShowUrlInput(false);
     setUrlInput("");
   };
@@ -47,7 +42,7 @@ export function SourceSelector() {
           <input
             value={urlInput}
             onChange={(e) => setUrlInput(e.target.value)}
-            placeholder="粘贴视频直链..."
+            placeholder="粘贴视频直链 / B站链接..."
             className="bg-ocean-950/60 text-ocean-100 text-xs rounded-lg px-3 py-1.5 w-44 outline-none border border-ocean-600/30 focus:border-ocean-400/60 focus:shadow-glow-sm transition-all placeholder:text-ocean-600"
             onKeyDown={(e) => e.key === "Enter" && handleUrl()}
             autoFocus
