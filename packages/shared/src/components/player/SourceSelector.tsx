@@ -5,14 +5,16 @@ import { usePlayerStore } from "../../stores/playerStore";
 function toEmbedUrl(raw: string): string {
   const url = raw.trim();
 
-  // B站 → 通过服务器代理，去除防盗链
+  // B站 → 桌面端用外部浏览器打开
   const bvMatch = url.match(/bilibili\.com\/video\/(BV[a-zA-Z0-9]+)/);
   if (bvMatch) {
-    const SERVER = (typeof window !== "undefined" && (window as any).__SERVER_URL__) ||
-                   "https://server-production-3db9.up.railway.app";
-    return `${SERVER}/api/v1/proxy?url=${encodeURIComponent(
-      `https://www.bilibili.com/video/${bvMatch[1]}/`
-    )}`;
+    const electronAPI = (window as any).electronAPI;
+    if (electronAPI?.openExternal) {
+      electronAPI.openExternal(url);
+    } else {
+      window.open(url, "_blank");
+    }
+    return ""; // 不设置 source，不渲染播放器
   }
 
   // YouTube: youtube.com/watch?v=xxx → youtube.com/embed/xxx
