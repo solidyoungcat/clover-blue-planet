@@ -30,7 +30,12 @@ function createWindow() {
     },
   });
 
-  mainWindow.loadURL("http://localhost:3000");
+  // 开发模式：加载 Vite dev server；打包模式：加载本地文件
+  if (process.env.NODE_ENV === "development" || !fs.existsSync(path.join(__dirname, "../../web/dist/index.html"))) {
+    mainWindow.loadURL("http://localhost:3000");
+  } else {
+    mainWindow.loadFile(path.join(__dirname, "../../web/dist/index.html"));
+  }
   mainWindow.webContents.openDevTools();
 }
 
